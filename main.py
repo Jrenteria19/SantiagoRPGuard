@@ -2930,8 +2930,103 @@ class JobApplicationView(ui.View):
             color=Colors.SUCCESS
         ), ephemeral=True)
 
+@bot.tree.command(name="postular-trabajo", description="Postula a un trabajo en Santiago RP")
+@is_job_applications_channel()
+@app_commands.autocomplete(trabajo=job_role_autocomplete)
+@app_commands.describe(
+    trabajo="Selecciona el trabajo al que deseas postular",
+    razon="Explica por qué quieres postular a este trabajo (mínimo 10 palabras)"
+)
+async def postular_trabajo(interaction: discord.Interaction, trabajo: str, razon: str):
+    """Comando para postular a un trabajo."""
+    await interaction.response.defer(ephemeral=True)
+
+    # Validate job selection
+    if trabajo not in JOB_ROLES:
+        await interaction.followup.send(embed=create_embed(
+            title="❌ Trabajo Inválido",
+            description="Por favor, selecciona un trabajo válido de la lista.",
+            color=Colors.DANGER
+        ), ephemeral=True)
+        return
+
+    # Validate reason length
+    reason_words = razon.split()
+    if len(reason_words) < 10:
+        await interaction.followup.send(embed=create_embed(
+            title="❌ Razón Inválida",
+            description="La razón debe tener al menos 10 palabras. Por favor, proporciona más detalles.",
+            color=Colors.DANGER
+        ), ephemeral=True)
+        return
+
+    # Send ephemeral confirmation to user
+    confirmation_embed = create_embed(
+        title="✅ Postulación Enviada",
+        description=(
+            f"Tu postulación al trabajo **{JOB_ROLES[trabajo]['name']}** ha sido enviada con éxito.\n\n"
+            "Por favor, espera la revisión del staff. Recibirás una respuesta en un plazo mínimo de **24 horas**.\n"
+            "**Nota:** Asegúrate de tener los DMs abiertos para recibir la notificación."
+        ),
+        color=Colors.SUCCESS,
+        user=interaction.user
+    )
+    confirmation_embed.set_thumbnail(url=interaction.guild.icon.url if interaction.guild.icon else "")
+    await interaction.followup.send(embed=confirmation_embed, ephemeral=True)
+
+    # Send application to staff review channel
+    review_channel = bot.get_channel(Channels.JOB_REVIEW)
+    if not review_channel:
+        print(f"❌ Error: No se encontró el canal con ID {Channels.JOB_REVIEW}")
+        await interaction.followup.send(embed=create_embed(
+            title="❌ Error",
+            description="No se pudo enviar la postulación. Contacta a un administrador.",
+            color=Colors.DANGER
+        ), ephemeral=True)
+        return
+
+    application_embed = create_embed(
+        title="💼 Nueva Postulación a Trabajo",
+        description=f"Se ha recibido una nueva postulación para el trabajo **{JOB_ROLES[trabajo]['name']}**.",
+        color=Colors.WARNING,
+        user=interaction.user
+    )
+    application_embed.add_field(name="👤 Postulante", value=interaction.user.mention, inline=True)
+    application_embed.add_field(name="💼 Trabajo", value=JOB_ROLES[trabajo]['name'], inline=True)
+    application_embed.add_field(name="📝 Razón", value=razon, inline=False)
+    application_embed.add_field(name="🕒 Fecha", value=datetime.now().strftime('%d/%m/%Y %H:%M'), inline=True)
+    application_embed.add_field(name="📋 Estado", value="**Pendiente**", inline=False)
+    application_embed.set_thumbnail(url=interaction.user.display_avatar.url)
+
+    view = JobApplicationView(applicant=interaction.user, job_key=trabajo, reason=razon)
+    try:
+        await review_channel.send(embed=application_embed, view=view)
+    except discord.errors.Forbidden:
+        print(f"❌ Error: El bot no tiene permisos para enviar mensajes en {Channels.JOB_REVIEW}")
+        await interaction.followup.send(embed=create_embed(
+            title="❌ Error",
+            description="No se pudo enviar la postulación. Verifica los permisos del bot.",
+            color=Colors.DANGER
+        ), ephemeral=True)
+        return
+
+    # Log to job logs channel (changed from SANCTION_LOGS to JOB_LOGS)
+    log_channel = bot.get_channel(Channels.JOB_LOGS)
+    if log_channel:
+        log_embed = create_embed(
+            title="📜 Nueva Postulación Registrada",
+            description=f"Se ha registrado una nueva postulación al trabajo {JOB_ROLES[trabajo]['name']}.",
+            color=Colors.WARNING,
+            user=interaction.user
+        )
+        log_embed.add_field(name="👤 Postulante", value=interaction.user.mention, inline=True)
+        log_embed.add_field(name="💼 Trabajo", value=JOB_ROLES[trabajo]['name'], inline=True)
+        log_embed.add_field(name="📝 Razón", value=razon, inline=False)
+        await log_channel.send(embed=log_embed)
+
 # =============================================
 # INICIAR BOT
 # =============================================
 if __name__ == "__main__":
     bot.run(TOKEN)
+
