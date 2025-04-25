@@ -92,6 +92,8 @@ class Channels:
     SANCTION_LOGS = 1364100682990354516
     VIEW_SANCTIONS = 1344075561689026722
     RATINGS = 1339386616405561398  
+    JOB_APPLICATIONS = 1365153550816116797  # Channel where /postular-trabajo is used
+    JOB_REVIEW = 1365158553412964433  # Channel where staff review applications
 
 class Roles:
     STAFF = [1339386615247798362, 1346545514492985486, 1339386615222767662, 1347803116741066834, 1339386615235346439]
@@ -100,6 +102,29 @@ class Roles:
     WARN_3 = 1341459796846579834
     WARN_4 = 1358226550046326895
     WARN_5 = 1358226564629926060
+    MEGANOTICIAS = 1348164800445808661
+    BARBERO = 1348163657086799892
+    TAXISTA = 1348163838905946122
+    BASURERO = 1348163889619144764
+    CARTERO = 1348163951921201152
+    CAFETERIA = 1348163986230607902
+    BANQUERO = 1348164352020185098
+    RAPPI = 1348164456814874644
+    MECANICO = 1348164518760546314
+    COPEC = 1348164577426149419
+    TIENDA_ROPA = 1348164652390940714
+    GRANJERO = 1348164695621898321
+    DOCTOR = 1348164862538416231
+    CONSTRUCTOR = 1348164938287419453
+    BURGERKING = 1348164981027508295
+    JOYERIA = 1348165001579593830
+    RESTAURANT_RJ = 1348165107145773096
+    PASTELERIA = 1348165182685319169
+    AGENCIA_VEHICULOS = 1348165259625631775
+    TIENDA_APPLE = 1348165319088144425
+    TACOS = 1348165379410890843
+    DRAGONES_CHINA = 1348165483878416384
+    SUELDO = 1346556183586148514
 
 TICKET_CATEGORIES = {
     "general_help": {
@@ -189,6 +214,31 @@ TICKET_CATEGORIES = {
 }
 
 server_status = "indefinido"
+
+JOB_ROLES = {
+    "meganoticias": {"name": "Meganoticias", "role_id": Roles.MEGANOTICIAS},
+    "barbero": {"name": "Barbero", "role_id": Roles.BARBERO},
+    "taxista": {"name": "Taxista", "role_id": Roles.TAXISTA},
+    "basurero": {"name": "Basurero", "role_id": Roles.BASURERO},
+    "cartero": {"name": "Cartero", "role_id": Roles.CARTERO},
+    "cafeteria": {"name": "Cafetería", "role_id": Roles.CAFETERIA},
+    "banquero": {"name": "Banquero", "role_id": Roles.BANQUERO},
+    "rappi": {"name": "Rappi", "role_id": Roles.RAPPI},
+    "mecanico": {"name": "Mecánico", "role_id": Roles.MECANICO},
+    "copec": {"name": "Copec", "role_id": Roles.COPEC},
+    "tienda_ropa": {"name": "Tienda de Ropa", "role_id": Roles.TIENDA_ROPA},
+    "granjero": {"name": "Granjero", "role_id": Roles.GRANJERO},
+    "doctor": {"name": "Doctor", "role_id": Roles.DOCTOR},
+    "constructor": {"name": "Constructor", "role_id": Roles.CONSTRUCTOR},
+    "burgerking": {"name": "Burger King", "role_id": Roles.BURGERKING},
+    "joyeria": {"name": "Joyería", "role_id": Roles.JOYERIA},
+    "restaurant_rj": {"name": "Restaurante R&J", "role_id": Roles.RESTAURANT_RJ},
+    "pasteleria": {"name": "Pastelería", "role_id": Roles.PASTELERIA},
+    "agencia_vehiculos": {"name": "Agencia de Vehículos", "role_id": Roles.AGENCIA_VEHICULOS},
+    "tienda_apple": {"name": "Tienda Apple", "role_id": Roles.TIENDA_APPLE},
+    "tacos": {"name": "Tacos", "role_id": Roles.TACOS},
+    "dragones_china": {"name": "Dragones China", "role_id": Roles.DRAGONES_CHINA}
+}
 
 # =============================================
 # HELPERS
@@ -2365,6 +2415,13 @@ async def ayuda(interaction: discord.Interaction):
             "description": "Califica a un miembro del staff con estrellas (1 a 5) y un comentario.",
             "channel": f"<#{Channels.RATINGS}>",
             "permissions": "Todos"
+        },
+        {
+            "name": "postular-trabajo",
+            "emoji": "💼",
+            "description": "Postula a un trabajo en Santiago RP (Meganoticias, Taxista, etc.).",
+            "channel": f"<#{Channels.JOB_APPLICATIONS}>",
+            "permissions": "Todos"
         }
     ]
 
@@ -2384,6 +2441,494 @@ async def ayuda(interaction: discord.Interaction):
     embed.set_footer(text="Santiago RP | Sistema Automatizado | Creado por Smile")
 
     await interaction.followup.send(embed=embed, ephemeral=True)
+
+async def job_role_autocomplete(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
+    """Autocompletar trabajos disponibles."""
+    return [
+        app_commands.Choice(name=job["name"], value=job_key)
+        for job_key, job in JOB_ROLES.items()
+        if current.lower() in job["name"].lower()
+    ]
+
+class AcceptJobModal(ui.Modal, title="✅ Aceptar Postulación"):
+    reason = ui.TextInput(
+        label="Razón de la aceptación",
+        placeholder="Explica por qué se aceptó la postulación (mínimo 10 palabras)...",
+        style=discord.TextStyle.long,
+        required=True,
+        min_length=50  # Approximate minimum for 10 words
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        self.interaction = interaction
+
+class DenyJobModal(ui.Modal, title="❌ Denegar Postulación"):
+    reason = ui.TextInput(
+        label="Razón de la denegación",
+        placeholder="Explica por qué se denegó la postulación (mínimo 10 palabras)...",
+        style=discord.TextStyle.long,
+        required=True,
+        min_length=50  # Approximate minimum for 10 words
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        self.interaction = interaction
+
+class JobApplicationView(ui.View):
+    """Vista con botones para aceptar o denegar postulaciones."""
+    def __init__(self, applicant: discord.Member, job_key: str, reason: str):
+        super().__init__(timeout=None)
+        self.applicant = applicant
+        self.job_key = job_key
+        self.reason = reason
+        self.custom_id = f"job_application_{applicant.id}_{job_key}"
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        """Verificar que el usuario tenga permisos de staff."""
+        if not any(role.id in Roles.STAFF for role in interaction.user.roles):
+            await interaction.response.send_message(embed=create_embed(
+                title="❌ Acceso Denegado",
+                description="Solo el staff puede aceptar o denegar postulaciones.",
+                color=Colors.DANGER
+            ), ephemeral=True)
+            return False
+        return True
+
+    @ui.button(label="Aceptar", style=discord.ButtonStyle.green, emoji="✅", custom_id="job_accept")
+    async def accept_button(self, interaction: discord.Interaction, button: ui.Button):
+        modal = AcceptJobModal()
+        await interaction.response.send_modal(modal)
+        
+        timed_out = await modal.wait()
+        if timed_out:
+            return
+
+        # Validate reason length
+        reason_words = modal.reason.value.split()
+        if len(reason_words) < 10:
+            await modal.interaction.followup.send(embed=create_embed(
+                title="❌ Razón Inválida",
+                description="La razón debe tener al menos 10 palabras.",
+                color=Colors.DANGER
+            ), ephemeral=True)
+            return
+
+        # Update embed to green (accepted)
+        embed = interaction.message.embeds[0]
+        embed.color = Colors.SUCCESS
+        embed.set_field_at(
+            index=len(embed.fields) - 1,
+            name="📋 Estado",
+            value=f"**Aceptada** por {interaction.user.mention}\n**Razón:** {modal.reason.value}",
+            inline=False
+        )
+        
+        # Disable buttons
+        self.children[0].disabled = True
+        self.children[1].disabled = True
+        await interaction.message.edit(embed=embed, view=self)
+
+        # Assign job role and sueldo role
+        job_role = interaction.guild.get_role(JOB_ROLES[self.job_key]["role_id"])
+        sueldo_role = interaction.guild.get_role(Roles.SUELDO)
+        try:
+            await self.applicant.add_roles(job_role, sueldo_role, reason=f"Postulación aceptada por {interaction.user.name}")
+        except Exception as e:
+            print(f"Error al asignar roles: {e}")
+            await modal.interaction.followup.send(embed=create_embed(
+                title="❌ Error",
+                description="No se pudieron asignar los roles. Verifica los permisos del bot.",
+                color=Colors.DANGER
+            ), ephemeral=True)
+            return
+
+        # Send notification to job applications channel
+        job_channel = bot.get_channel(Channels.JOB_APPLICATIONS)
+        if job_channel:
+            await job_channel.send(
+                content=f"🎉 {self.applicant.mention}, ¡tu postulación al trabajo **{JOB_ROLES[self.job_key]['name']}** ha sido **aceptada**! Se te ha asignado un sueldo de **550,000 CLP**.",
+                embed=create_embed(
+                    title="✅ Postulación Aceptada",
+                    description=(
+                        f"**Usuario:** {self.applicant.mention}\n"
+                        f"**Trabajo:** {JOB_ROLES[self.job_key]['name']}\n"
+                        f"**Razón de aceptación:** {modal.reason.value}\n"
+                        f"**Aprobado por:** {interaction.user.mention}"
+                    ),
+                    color=Colors.SUCCESS,
+                    user=interaction.user
+                )
+            )
+
+        # Send DM to applicant
+        dm_embed = create_embed(
+            title="🎉 ¡Postulación Aceptada!",
+            description=(
+                f"¡Felicidades, {self.applicant.mention}! Tu postulación al trabajo **{JOB_ROLES[self.job_key]['name']}** en **Santiago RP** ha sido **aceptada**.\n\n"
+                f"**Razón de aceptación:** {modal.reason.value}\n"
+                f"**Sueldo asignado:** 550,000 CLP\n"
+                f"**Aprobado por:** {interaction.user.mention}\n\n"
+                "¡Prepárate para comenzar tu nuevo rol! Contacta al staff si necesitas orientación."
+            ),
+            color=Colors.SUCCESS
+        )
+        try:
+            await self.applicant.send(embed=dm_embed)
+        except discord.errors.Forbidden:
+            await modal.interaction.followup.send(embed=create_embed(
+                title="⚠️ Advertencia",
+                description=f"No se pudo enviar el mensaje directo a {self.applicant.mention}. Es posible que tenga los DMs cerrados.",
+                color=Colors.WARNING
+            ), ephemeral=True)
+
+        # Send log to sanction logs
+        log_channel = bot.get_channel(Channels.SANCTION_LOGS)
+        if log_channel:
+            log_embed = create_embed(
+                title="📜 Postulación Aceptada",
+                description=f"Se ha aceptado una postulación al trabajo {JOB_ROLES[self.job_key]['name']}.",
+                color=Colors.SUCCESS,
+                user=interaction.user
+            )
+            log_embed.add_field(name="👤 Usuario", value=self.applicant.mention, inline=True)
+            log_embed.add_field(name="💼 Trabajo", value=JOB_ROLES[self.job_key]['name'], inline=True)
+            log_embed.add_field(name="📝 Razón de aceptación", value=modal.reason.value, inline=False)
+            log_embed.add_field(name="👮 Aprobado por", value=interaction.user.mention, inline=True)
+            await log_channel.send(embed=log_embed)
+
+        await modal.interaction.followup.send(embed=create_embed(
+            title="✅ Acción Completada",
+            description=f"La postulación de {self.applicant.mention} al trabajo {JOB_ROLES[self.job_key]['name']} ha sido aceptada.",
+            color=Colors.SUCCESS
+        ), ephemeral=True)
+
+    @ui.button(label="Denegar", style=discord.ButtonStyle.red, emoji="❌", custom_id="job_deny")
+    async def deny_button(self, interaction: discord.Interaction, button: ui.Button):
+        modal = DenyJobModal()
+        await interaction.response.send_modal(modal)
+        
+        timed_out = await modal.wait()
+        if timed_out:
+            return
+
+        # Validate reason length
+        reason_words = modal.reason.value.split()
+        if len(reason_words) < 10:
+            await modal.interaction.followup.send(embed=create_embed(
+                title="❌ Razón Inválida",
+                description="La razón debe tener al menos 10 palabras.",
+                color=Colors.DANGER
+            ), ephemeral=True)
+            return
+
+        # Update embed to red (denied)
+        embed = interaction.message.embeds[0]
+        embed.color = Colors.DANGER
+        embed.set_field_at(
+            index=len(embed.fields) - 1,
+            name="📋 Estado",
+            value=f"**Denegada** por {interaction.user.mention}\n**Razón:** {modal.reason.value}",
+            inline=False
+        )
+        
+        # Disable buttons
+        self.children[0].disabled = True
+        self.children[1].disabled = True
+        await interaction.message.edit(embed=embed, view=self)
+
+        # Send notification to job applications channel
+        job_channel = bot.get_channel(Channels.JOB_APPLICATIONS)
+        if job_channel:
+            await job_channel.send(
+                content=f"😔 {self.applicant.mention}, tu postulación al trabajo **{JOB_ROLES[self.job_key]['name']}** ha sido **denegada**.",
+                embed=create_embed(
+                    title="❌ Postulación Denegada",
+                    description=(
+                        f"**Usuario:** {self.applicant.mention}\n"
+                        f"**Trabajo:** {JOB_ROLES[self.job_key]['name']}\n"
+                        f"**Razón de denegación:** {modal.reason.value}\n"
+                        f"**Denegado por:** {interaction.user.mention}"
+                    ),
+                    color=Colors.DANGER,
+                    user=interaction.user
+                )
+            )
+
+        # Send DM to applicant
+        dm_embed = create_embed(
+            title="😔 Postulación Denegada",
+            description=(
+                f"Lo sentimos, {self.applicant.mention}. Tu postulación al trabajo **{JOB_ROLES[self.job_key]['name']}** en **Santiago RP** ha sido **denegada**.\n\n"
+                f"**Razón de denegación:** {modal.reason.value}\n"
+                f"**Denegado por:** {interaction.user.mention}\n\n"
+                "Puedes intentar postular nuevamente en el futuro. Si tienes dudas, abre un ticket en el canal de soporte."
+            ),
+            color=Colors.DANGER
+        )
+        try:
+            await self.applicant.send(embed=dm_embed)
+        except discord.errors.Forbidden:
+            await modal.interaction.followup.send(embed=create_embed(
+                title="⚠️ Advertencia",
+                description=f"No se pudo enviar el mensaje directo a {self.applicant.mention}. Es posible que tenga los DMs cerrados.",
+                color=Colors.WARNING
+            ), ephemeral=True)
+
+        # Send log to sanction logs
+        log_channel = bot.get_channel(Channels.SANCTION_LOGS)
+        if log_channel:
+            log_embed = create_embed(
+                title="📜 Postulación Denegada",
+                description=f"Se ha denegado una postulación al trabajo {JOB_ROLES[self.job_key]['name']}.",
+                color=Colors.DANGER,
+                user=interaction.user
+            )
+            log_embed.add_field(name="👤 Usuario", value=self.applicant.mention, inline=True)
+            log_embed.add_field(name="💼 Trabajo", value=JOB_ROLES[self.job_key]['name'], inline=True)
+            log_embed.add_field(name="📝 Razón de denegación", value=modal.reason.value, inline=False)
+            log_embed.add_field(name="👮 Denegado por", value=interaction.user.mention, inline=True)
+            await log_channel.send(embed=log_embed)
+
+        await modal.interaction.followup.send(embed=create_embed(
+            title="✅ Acción Completada",
+            description=f"La postulación de {self.applicant.mention} al trabajo {JOB_ROLES[self.job_key]['name']} ha sido denegada.",
+            color=Colors.SUCCESS
+        ), ephemeral=True)
+
+def is_job_applications_channel():
+    async def predicate(interaction: discord.Interaction) -> bool:
+        if interaction.channel_id != Channels.JOB_APPLICATIONS:
+            await interaction.response.send_message(embed=create_embed(
+                title="❌ Canal Incorrecto",
+                description=f"Este comando solo puede usarse en <#{Channels.JOB_APPLICATIONS}>.",
+                color=Colors.DANGER
+            ), ephemeral=True)
+            return False
+        return True
+    return app_commands.check(predicate)
+
+class JobApplicationView(ui.View):
+    """Vista con botones para aceptar o denegar postulaciones."""
+    def __init__(self, applicant: discord.Member, job_key: str, reason: str):
+        super().__init__(timeout=None)
+        self.applicant = applicant
+        self.job_key = job_key
+        self.reason = reason
+        self.custom_id = f"job_application_{applicant.id}_{job_key}"
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        """Verificar que el usuario tenga permisos de staff."""
+        if not any(role.id in Roles.STAFF for role in interaction.user.roles):
+            await interaction.response.send_message(embed=create_embed(
+                title="❌ Acceso Denegado",
+                description="Solo el staff puede aceptar o denegar postulaciones.",
+                color=Colors.DANGER
+            ), ephemeral=True)
+            return False
+        return True
+
+    @ui.button(label="Aceptar", style=discord.ButtonStyle.green, emoji="✅", custom_id="job_accept")
+    async def accept_button(self, interaction: discord.Interaction, button: ui.Button):
+        modal = AcceptJobModal()
+        await interaction.response.send_modal(modal)
+        
+        timed_out = await modal.wait()
+        if timed_out:
+            return
+
+        # Validate reason length
+        reason_words = modal.reason.value.split()
+        if len(reason_words) < 10:
+            await modal.interaction.followup.send(embed=create_embed(
+                title="❌ Razón Inválida",
+                description="La razón debe tener al menos 10 palabras.",
+                color=Colors.DANGER
+            ), ephemeral=True)
+            return
+
+        # Update embed to green (accepted)
+        embed = interaction.message.embeds[0]
+        embed.color = Colors.SUCCESS
+        embed.set_field_at(
+            index=len(embed.fields) - 1,
+            name="📋 Estado",
+            value=f"**Aceptada** por {interaction.user.mention}\n**Razón:** {modal.reason.value}",
+            inline=False
+        )
+        
+        # Disable buttons
+        self.children[0].disabled = True
+        self.children[1].disabled = True
+        await interaction.message.edit(embed=embed, view=self)
+
+        # Assign job role and sueldo role
+        job_role = interaction.guild.get_role(JOB_ROLES[self.job_key]["role_id"])
+        sueldo_role = interaction.guild.get_role(Roles.SUELDO)
+        try:
+            await self.applicant.add_roles(job_role, sueldo_role, reason=f"Postulación aceptada por {interaction.user.name}")
+        except Exception as e:
+            print(f"Error al asignar roles: {e}")
+            await modal.interaction.followup.send(embed=create_embed(
+                title="❌ Error",
+                description="No se pudieron asignar los roles. Verifica los permisos del bot.",
+                color=Colors.DANGER
+            ), ephemeral=True)
+            return
+
+        # Send notification to job applications channel
+        job_channel = bot.get_channel(Channels.JOB_APPLICATIONS)
+        if job_channel:
+            await job_channel.send(
+                content=f"🎉 {self.applicant.mention}, ¡tu postulación al trabajo **{JOB_ROLES[self.job_key]['name']}** ha sido **aceptada**! Se te ha asignado un sueldo de **550,000 CLP**.",
+                embed=create_embed(
+                    title="✅ Postulación Aceptada",
+                    description=(
+                        f"**Usuario:** {self.applicant.mention}\n"
+                        f"**Trabajo:** {JOB_ROLES[self.job_key]['name']}\n"
+                        f"**Razón de aceptación:** {modal.reason.value}\n"
+                        f"**Aprobado por:** {interaction.user.mention}"
+                    ),
+                    color=Colors.SUCCESS,
+                    user=interaction.user
+                )
+            )
+
+        # Send DM to applicant
+        dm_embed = create_embed(
+            title="🎉 ¡Postulación Aceptada!",
+            description=(
+                f"¡Felicidades, {self.applicant.mention}! Tu postulación al trabajo **{JOB_ROLES[self.job_key]['name']}** en **Santiago RP** ha sido **aceptada**.\n\n"
+                f"**Razón de aceptación:** {modal.reason.value}\n"
+                f"**Sueldo asignado:** 550,000 CLP\n"
+                f"**Aprobado por:** {interaction.user.mention}\n\n"
+                "¡Prepárate para comenzar tu nuevo rol! Contacta al staff si necesitas orientación."
+            ),
+            color=Colors.SUCCESS
+        )
+        try:
+            await self.applicant.send(embed=dm_embed)
+        except discord.errors.Forbidden:
+            await modal.interaction.followup.send(embed=create_embed(
+                title="⚠️ Advertencia",
+                description=f"No se pudo enviar el mensaje directo a {self.applicant.mention}. Es posible que tenga los DMs cerrados.",
+                color=Colors.WARNING
+            ), ephemeral=True)
+
+        # Send log to job logs channel (changed from SANCTION_LOGS to JOB_LOGS)
+        log_channel = bot.get_channel(Channels.JOB_LOGS)
+        if log_channel:
+            log_embed = create_embed(
+                title="📜 Postulación Aceptada",
+                description=f"Se ha aceptado una postulación al trabajo {JOB_ROLES[self.job_key]['name']}.",
+                color=Colors.SUCCESS,
+                user=interaction.user
+            )
+            log_embed.add_field(name="👤 Usuario", value=self.applicant.mention, inline=True)
+            log_embed.add_field(name="💼 Trabajo", value=JOB_ROLES[self.job_key]['name'], inline=True)
+            log_embed.add_field(name="📝 Razón de aceptación", value=modal.reason.value, inline=False)
+            log_embed.add_field(name="👮 Aprobado por", value=interaction.user.mention, inline=True)
+            await log_channel.send(embed=log_embed)
+
+        await modal.interaction.followup.send(embed=create_embed(
+            title="✅ Acción Completada",
+            description=f"La postulación de {self.applicant.mention} al trabajo {JOB_ROLES[self.job_key]['name']} ha sido aceptada.",
+            color=Colors.SUCCESS
+        ), ephemeral=True)
+
+    @ui.button(label="Denegar", style=discord.ButtonStyle.red, emoji="❌", custom_id="job_deny")
+    async def deny_button(self, interaction: discord.Interaction, button: ui.Button):
+        modal = DenyJobModal()
+        await interaction.response.send_modal(modal)
+        
+        timed_out = await modal.wait()
+        if timed_out:
+            return
+
+        # Validate reason length
+        reason_words = modal.reason.value.split()
+        if len(reason_words) < 10:
+            await modal.interaction.followup.send(embed=create_embed(
+                title="❌ Razón Inválida",
+                description="La razón debe tener al menos 10 palabras.",
+                color=Colors.DANGER
+            ), ephemeral=True)
+            return
+
+        # Update embed to red (denied)
+        embed = interaction.message.embeds[0]
+        embed.color = Colors.DANGER
+        embed.set_field_at(
+            index=len(embed.fields) - 1,
+            name="📋 Estado",
+            value=f"**Denegada** por {interaction.user.mention}\n**Razón:** {modal.reason.value}",
+            inline=False
+        )
+        
+        # Disable buttons
+        self.children[0].disabled = True
+        self.children[1].disabled = True
+        await interaction.message.edit(embed=embed, view=self)
+
+        # Send notification to job applications channel
+        job_channel = bot.get_channel(Channels.JOB_APPLICATIONS)
+        if job_channel:
+            await job_channel.send(
+                content=f"😔 {self.applicant.mention}, tu postulación al trabajo **{JOB_ROLES[self.job_key]['name']}** ha sido **denegada**.",
+                embed=create_embed(
+                    title="❌ Postulación Denegada",
+                    description=(
+                        f"**Usuario:** {self.applicant.mention}\n"
+                        f"**Trabajo:** {JOB_ROLES[self.job_key]['name']}\n"
+                        f"**Razón de denegación:** {modal.reason.value}\n"
+                        f"**Denegado por:** {interaction.user.mention}"
+                    ),
+                    color=Colors.DANGER,
+                    user=interaction.user
+                )
+            )
+
+        # Send DM to applicant
+        dm_embed = create_embed(
+            title="😔 Postulación Denegada",
+            description=(
+                f"Lo sentimos, {self.applicant.mention}. Tu postulación al trabajo **{JOB_ROLES[self.job_key]['name']}** en **Santiago RP** ha sido **denegada**.\n\n"
+                f"**Razón de denegación:** {modal.reason.value}\n"
+                f"**Denegado por:** {interaction.user.mention}\n\n"
+                "Puedes intentar postular nuevamente en el futuro. Si tienes dudas, abre un ticket en el canal de soporte."
+            ),
+            color=Colors.DANGER
+        )
+        try:
+            await self.applicant.send(embed=dm_embed)
+        except discord.errors.Forbidden:
+            await modal.interaction.followup.send(embed=create_embed(
+                title="⚠️ Advertencia",
+                description=f"No se pudo enviar el mensaje directo a {self.applicant.mention}. Es posible que tenga los DMs cerrados.",
+                color=Colors.WARNING
+            ), ephemeral=True)
+
+        # Send log to job logs channel (changed from SANCTION_LOGS to JOB_LOGS)
+        log_channel = bot.get_channel(Channels.JOB_LOGS)
+        if log_channel:
+            log_embed = create_embed(
+                title="📜 Postulación Denegada",
+                description=f"Se ha denegado una postulación al trabajo {JOB_ROLES[self.job_key]['name']}.",
+                color=Colors.DANGER,
+                user=interaction.user
+            )
+            log_embed.add_field(name="👤 Usuario", value=self.applicant.mention, inline=True)
+            log_embed.add_field(name="💼 Trabajo", value=JOB_ROLES[self.job_key]['name'], inline=True)
+            log_embed.add_field(name="📝 Razón de denegación", value=modal.reason.value, inline=False)
+            log_embed.add_field(name="👮 Denegado por", value=interaction.user.mention, inline=True)
+            await log_channel.send(embed=log_embed)
+
+        await modal.interaction.followup.send(embed=create_embed(
+            title="✅ Acción Completada",
+            description=f"La postulación de {self.applicant.mention} al trabajo {JOB_ROLES[self.job_key]['name']} ha sido denegada.",
+            color=Colors.SUCCESS
+        ), ephemeral=True)
 
 # =============================================
 # INICIAR BOT
