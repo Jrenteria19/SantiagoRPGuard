@@ -2935,4 +2935,3 @@ class JobApplicationView(ui.View):
 # =============================================
 if __name__ == "__main__":
     bot.run(TOKEN)
-
