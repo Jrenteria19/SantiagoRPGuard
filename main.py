@@ -283,19 +283,6 @@ def create_embed(title: str, description: str, color: int, user: discord.Member 
         embed.set_thumbnail(url=thumbnail)
     return embed
 
-async def purge_channel(channel, limit=100):
-    """Purgar mensajes de un canal."""
-    try:
-        deleted = await channel.purge(limit=limit)
-        print(f"Se han eliminado {len(deleted)} mensajes del canal {channel.name}")
-        return len(deleted)
-    except discord.Forbidden:
-        print(f"No tengo permisos para eliminar mensajes en {channel.name}")
-        return 0
-    except discord.HTTPException as e:
-        print(f"Error al purgar mensajes: {e}")
-        return 0
-
 # =============================================
 # FUNCIONES DE SANCIONES
 # =============================================
@@ -1655,42 +1642,6 @@ async def control_panel(interaction: discord.Interaction):
     
     await interaction.response.send_message(embed=embed, view=ControlPanelView())
 
-@bot.tree.command(name="crear-panel", description="Crear un panel de control para el servidor")
-@app_commands.default_permissions(administrator=True)
-async def crear_panel(interaction: discord.Interaction):
-    """Comando para crear un panel de control del servidor."""
-    # Verificar si el canal es el correcto
-    if interaction.channel_id != Channels.CONTROL_PANEL:
-        await interaction.response.send_message(embed=create_embed(
-            title="❌ Canal Incorrecto",
-            description=f"Este comando solo puede usarse en el canal <#{Channels.CONTROL_PANEL}>.",
-            color=Colors.DANGER
-        ), ephemeral=True)
-        return
-
-    await interaction.response.defer(ephemeral=True)
-    
-    # Purgar el canal antes de enviar el panel
-    await purge_channel(interaction.channel)
-    
-    # Crear el panel de control
-    embed = create_embed(
-        title="⚙️ Panel de Control Santiago RP",
-        description="Gestiona el servidor con las siguientes opciones:",
-        color=Colors.PRIMARY
-    )
-    embed.add_field(name="🚀 Abrir Servidor", value="Abre el servidor para todos los jugadores.", inline=True)
-    embed.add_field(name="🗳️ Iniciar Votación", value="Inicia una votación para abrir el servidor.", inline=True)
-    embed.add_field(name="🔒 Cerrar Servidor", value="Cierra el servidor y notifica a los jugadores.", inline=True)
-    
-    await interaction.channel.send(embed=embed, view=ControlPanelView())
-    
-    await interaction.followup.send(embed=create_embed(
-        title="✅ Panel Creado",
-        description="El panel de control ha sido creado correctamente.",
-        color=Colors.SUCCESS
-    ), ephemeral=True)
-
 def is_tickets_channel():
     async def predicate(interaction: discord.Interaction) -> bool:
         if interaction.channel_id != Channels.TICKETS:
@@ -1719,38 +1670,6 @@ async def setup_tickets(interaction: discord.Interaction):
         ),
         color=Colors.INFO,
         user=interaction.user
-    )
-    
-@bot.tree.command(name="crear-tickets", description="Crear un panel de tickets para soporte")
-@app_commands.default_permissions(administrator=True)
-async def crear_tickets(interaction: discord.Interaction):
-    """Comando para crear un panel de tickets."""
-    # Verificar si el canal es el correcto
-    if interaction.channel_id != Channels.TICKETS:
-        await interaction.response.send_message(embed=create_embed(
-            title="❌ Canal Incorrecto",
-            description=f"Este comando solo puede usarse en el canal <#{Channels.TICKETS}>.",
-            color=Colors.DANGER
-        ), ephemeral=True)
-        return
-
-    await interaction.response.defer(ephemeral=True)
-    
-    # Purgar el canal antes de enviar el panel
-    await purge_channel(interaction.channel)
-    
-    # Crear el panel de tickets
-    embed = create_embed(
-        title="🎫 Sistema de Tickets Santiago RP",
-        description=(
-            "¡Bienvenido al sistema de tickets de **Santiago RP**! 🎉\n"
-            "Selecciona la categoría que mejor se ajuste a tu necesidad usando el menú desplegable.\n\n"
-            "**⚠️ IMPORTANTE:**\n"
-            "- Asegúrate de abrir tickets con un motivo válido.\n"
-            "- Los tickets sin justificación pueden resultar en **sanciones**.\n"
-            "- Lee las reglas del servidor antes de crear un ticket."
-        ),
-        color=Colors.INFO
     )
     
     embed.add_field(
@@ -2608,38 +2527,13 @@ class JobApplicationView(ui.View):
         # Assign job role and sueldo role
         job_role = interaction.guild.get_role(JOB_ROLES[self.job_key]["role_id"])
         sueldo_role = interaction.guild.get_role(Roles.SUELDO)
-        
-        # Verificar que los roles existan antes de intentar asignarlos
-        if not job_role:
-            await modal.interaction.followup.send(embed=create_embed(
-                title="❌ Error",
-                description=f"No se encontró el rol para el trabajo {JOB_ROLES[self.job_key]['name']}. Contacta a un administrador.",
-                color=Colors.DANGER
-            ), ephemeral=True)
-            return
-            
-        if not sueldo_role:
-            await modal.interaction.followup.send(embed=create_embed(
-                title="❌ Error",
-                description="No se encontró el rol de sueldo. Contacta a un administrador.",
-                color=Colors.DANGER
-            ), ephemeral=True)
-            return
-            
         try:
             await self.applicant.add_roles(job_role, sueldo_role, reason=f"Postulación aceptada por {interaction.user.name}")
-        except discord.errors.Forbidden:
-            await modal.interaction.followup.send(embed=create_embed(
-                title="❌ Error de Permisos",
-                description="El bot no tiene permisos suficientes para asignar roles. Verifica que el rol del bot esté por encima de los roles que intenta asignar.",
-                color=Colors.DANGER
-            ), ephemeral=True)
-            return
         except Exception as e:
             print(f"Error al asignar roles: {e}")
             await modal.interaction.followup.send(embed=create_embed(
                 title="❌ Error",
-                description=f"No se pudieron asignar los roles. Error: {str(e)}",
+                description="No se pudieron asignar los roles. Verifica los permisos del bot.",
                 color=Colors.DANGER
             ), ephemeral=True)
             return
@@ -2866,38 +2760,13 @@ class JobApplicationView(ui.View):
         # Assign job role and sueldo role
         job_role = interaction.guild.get_role(JOB_ROLES[self.job_key]["role_id"])
         sueldo_role = interaction.guild.get_role(Roles.SUELDO)
-        
-        # Verificar que los roles existan antes de intentar asignarlos
-        if not job_role:
-            await modal.interaction.followup.send(embed=create_embed(
-                title="❌ Error",
-                description=f"No se encontró el rol para el trabajo {JOB_ROLES[self.job_key]['name']}. Contacta a un administrador.",
-                color=Colors.DANGER
-            ), ephemeral=True)
-            return
-            
-        if not sueldo_role:
-            await modal.interaction.followup.send(embed=create_embed(
-                title="❌ Error",
-                description="No se encontró el rol de sueldo. Contacta a un administrador.",
-                color=Colors.DANGER
-            ), ephemeral=True)
-            return
-            
         try:
             await self.applicant.add_roles(job_role, sueldo_role, reason=f"Postulación aceptada por {interaction.user.name}")
-        except discord.errors.Forbidden:
-            await modal.interaction.followup.send(embed=create_embed(
-                title="❌ Error de Permisos",
-                description="El bot no tiene permisos suficientes para asignar roles. Verifica que el rol del bot esté por encima de los roles que intenta asignar.",
-                color=Colors.DANGER
-            ), ephemeral=True)
-            return
         except Exception as e:
             print(f"Error al asignar roles: {e}")
             await modal.interaction.followup.send(embed=create_embed(
                 title="❌ Error",
-                description=f"No se pudieron asignar los roles. Error: {str(e)}",
+                description="No se pudieron asignar los roles. Verifica los permisos del bot.",
                 color=Colors.DANGER
             ), ephemeral=True)
             return
