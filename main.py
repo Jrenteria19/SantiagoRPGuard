@@ -3,16 +3,24 @@ from discord.ext import commands
 from discord import app_commands, ui
 import asyncio
 import os
-import sqlite3
+import pymysql
 import uuid
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 import time
 import asyncio
+import pytz
 
 # Cargar variables de entorno
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
+
+# Variables de entorno para MySQL en Railway
+DB_HOST = os.getenv('MYSQLHOST', 'localhost')
+DB_USER = os.getenv('MYSQLUSER', 'root')
+DB_PASSWORD = os.getenv('MYSQLPASSWORD', '')
+DB_NAME = os.getenv('MYSQLDATABASE', 'railway')
+DB_PORT = int(os.getenv('MYSQLPORT', '3306'))
 
 # Configuración del bot con intenciones
 intents = discord.Intents.all()
@@ -21,43 +29,60 @@ bot = commands.Bot(command_prefix='!', intents=intents, help_command=None)
 # =============================================
 # BASE DE DATOS
 # =============================================
-def init_db():
-    """Inicializar la base de datos SQLite para sanciones y calificaciones."""
-    print("Inicializando base de datos 'adminsantiagoRP.db'...")
+def get_db_connection():
+    """Obtener conexión a la base de datos MySQL."""
     try:
-        conn = sqlite3.connect('adminsantiagoRP.db')
-        c = conn.cursor()
-        # Tabla de sanciones
-        c.execute('''
-            CREATE TABLE IF NOT EXISTS sanciones (
-                sanction_id TEXT PRIMARY KEY,
-                user_id INTEGER,
-                username TEXT,
-                reason TEXT,
-                sanction_type TEXT,
-                proof_url TEXT,
-                admin_id INTEGER,
-                admin_name TEXT,
-                date TEXT,
-                active BOOLEAN
-            )
-        ''')
-        # Tabla de calificaciones
-        c.execute('''
-            CREATE TABLE IF NOT EXISTS calificaciones (
-                rating_id TEXT PRIMARY KEY,
-                staff_id INTEGER,
-                staff_name TEXT,
-                rating INTEGER,
-                comment TEXT,
-                user_id INTEGER,
-                user_name TEXT,
-                date TEXT
-            )
-        ''')
-        conn.commit()
-        print("Tablas 'sanciones' y 'calificaciones' creadas o verificadas correctamente.")
-    except sqlite3.Error as e:
+        connection = pymysql.connect(
+            host=DB_HOST,
+            user=DB_USER,
+            password=DB_PASSWORD,
+            database=DB_NAME,
+            port=DB_PORT,
+            charset='utf8mb4',
+            cursorclass=pymysql.cursors.DictCursor
+        )
+        return connection
+    except pymysql.Error as e:
+        print(f"Error al conectar a MySQL: {e}")
+        raise
+
+def init_db():
+    """Inicializar la base de datos MySQL para sanciones y calificaciones."""
+    print("Inicializando base de datos MySQL en Railway...")
+    try:
+        conn = get_db_connection()
+        with conn.cursor() as cursor:
+            # Tabla de sanciones
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS sanciones (
+                    sanction_id VARCHAR(36) PRIMARY KEY,
+                    user_id BIGINT,
+                    username VARCHAR(255),
+                    reason TEXT,
+                    sanction_type VARCHAR(50),
+                    proof_url TEXT,
+                    admin_id BIGINT,
+                    admin_name VARCHAR(255),
+                    date DATETIME,
+                    active BOOLEAN
+                )
+            ''')
+            # Tabla de calificaciones
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS calificaciones (
+                    rating_id VARCHAR(36) PRIMARY KEY,
+                    staff_id BIGINT,
+                    staff_name VARCHAR(255),
+                    rating INT,
+                    comment TEXT,
+                    user_id BIGINT,
+                    user_name VARCHAR(255),
+                    date DATETIME
+                )
+            ''')
+            conn.commit()
+            print("Tablas 'sanciones' y 'calificaciones' creadas o verificadas correctamente.")
+    except pymysql.Error as e:
         print(f"Error al inicializar la base de datos: {e}")
     finally:
         if conn:
@@ -264,34 +289,19 @@ def create_embed(title: str, description: str, color: int, user: discord.Member 
 def save_sanction(user_id: int, username: str, reason: str, sanction_type: str, proof_url: str, admin_id: int, admin_name: str):
     """Guardar una sanción en la base de datos."""
     sanction_id = str(uuid.uuid4())
-    date = datetime.now().isoformat()
+    date = datetime.now()
     try:
-        conn = sqlite3.connect('adminsantiagoRP.db')
-        c = conn.cursor()
-        # Verificar si la tabla sanciones existe, y crearla si no
-        c.execute('''
-            CREATE TABLE IF NOT EXISTS sanciones (
-                sanction_id TEXT PRIMARY KEY,
-                user_id INTEGER,
-                username TEXT,
-                reason TEXT,
-                sanction_type TEXT,
-                proof_url TEXT,
-                admin_id INTEGER,
-                admin_name TEXT,
-                date TEXT,
-                active BOOLEAN
-            )
-        ''')
-        # Insertar la sanción
-        c.execute('''
-            INSERT INTO sanciones (sanction_id, user_id, username, reason, sanction_type, proof_url, admin_id, admin_name, date, active)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (sanction_id, user_id, username, reason, sanction_type, proof_url, admin_id, admin_name, date, True))
-        conn.commit()
-        print(f"Sanción {sanction_id} guardada correctamente.")
-        return sanction_id
-    except sqlite3.Error as e:
+        conn = get_db_connection()
+        with conn.cursor() as cursor:
+            # Insertar la sanción
+            cursor.execute('''
+                INSERT INTO sanciones (sanction_id, user_id, username, reason, sanction_type, proof_url, admin_id, admin_name, date, active)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ''', (sanction_id, user_id, username, reason, sanction_type, proof_url, admin_id, admin_name, date, True))
+            conn.commit()
+            print(f"Sanción {sanction_id} guardada correctamente.")
+            return sanction_id
+    except pymysql.Error as e:
         print(f"Error al guardar sanción: {e}")
         raise
     finally:
@@ -301,92 +311,56 @@ def save_sanction(user_id: int, username: str, reason: str, sanction_type: str, 
 def count_active_sanctions(user_id: int) -> int:
     """Contar sanciones activas de un usuario."""
     try:
-        conn = sqlite3.connect('adminsantiagoRP.db')
-        c = conn.cursor()
-        # Verificar si la tabla sanciones existe
-        c.execute('''
-            CREATE TABLE IF NOT EXISTS sanciones (
-                sanction_id TEXT PRIMARY KEY,
-                user_id INTEGER,
-                username TEXT,
-                reason TEXT,
-                sanction_type TEXT,
-                proof_url TEXT,
-                admin_id INTEGER,
-                admin_name TEXT,
-                date TEXT,
-                active BOOLEAN
-            )
-        ''')
-        c.execute('SELECT COUNT(*) FROM sanciones WHERE user_id = ? AND active = ?', (user_id, True))
-        count = c.fetchone()[0]
-        conn.close()
-        return count
-    except sqlite3.Error as e:
+        conn = get_db_connection()
+        with conn.cursor() as cursor:
+            cursor.execute('SELECT COUNT(*) as count FROM sanciones WHERE user_id = %s AND active = %s', (user_id, True))
+            result = cursor.fetchone()
+            count = result['count']
+            return count
+    except pymysql.Error as e:
         print(f"Error al contar sanciones: {e}")
         raise
+    finally:
+        if conn:
+            conn.close()
 
 def get_user_sanctions(user_id: int) -> list:
     """Obtener todas las sanciones activas de un usuario."""
     try:
-        conn = sqlite3.connect('adminsantiagoRP.db')
-        c = conn.cursor()
-        # Verificar si la tabla sanciones existe
-        c.execute('''
-            CREATE TABLE IF NOT EXISTS sanciones (
-                sanction_id TEXT PRIMARY KEY,
-                user_id INTEGER,
-                username TEXT,
-                reason TEXT,
-                sanction_type TEXT,
-                proof_url TEXT,
-                admin_id INTEGER,
-                admin_name TEXT,
-                date TEXT,
-                active BOOLEAN
-            )
-        ''')
-        c.execute('''
-            SELECT sanction_id, reason, sanction_type, proof_url, admin_name, date
-            FROM sanciones
-            WHERE user_id = ? AND active = ?
-            ORDER BY date DESC
-        ''', (user_id, True))
-        sanctions = c.fetchall()
-        conn.close()
-        return sanctions
-    except sqlite3.Error as e:
+        conn = get_db_connection()
+        with conn.cursor() as cursor:
+            cursor.execute('''
+                SELECT sanction_id, reason, sanction_type, proof_url, admin_name, date
+                FROM sanciones
+                WHERE user_id = %s AND active = %s
+                ORDER BY date DESC
+            ''', (user_id, True))
+            sanctions = cursor.fetchall()
+            # Convertir a formato de tupla para mantener compatibilidad
+            result = [(s['sanction_id'], s['reason'], s['sanction_type'], s['proof_url'], s['admin_name'], s['date'].isoformat()) for s in sanctions]
+            return result
+    except pymysql.Error as e:
         print(f"Error al obtener sanciones: {e}")
         raise
+    finally:
+        if conn:
+            conn.close()
 
 def delete_user_sanctions(user_id: int) -> int:
     """Marcar todas las sanciones activas de un usuario como inactivas."""
     try:
-        conn = sqlite3.connect('adminsantiagoRP.db')
-        c = conn.cursor()
-        # Verificar si la tabla sanciones existe
-        c.execute('''
-            CREATE TABLE IF NOT EXISTS sanciones (
-                sanction_id TEXT PRIMARY KEY,
-                user_id INTEGER,
-                username TEXT,
-                reason TEXT,
-                sanction_type TEXT,
-                proof_url TEXT,
-                admin_id INTEGER,
-                admin_name TEXT,
-                date TEXT,
-                active BOOLEAN
-            )
-        ''')
-        c.execute('UPDATE sanciones SET active = ? WHERE user_id = ? AND active = ?', (False, user_id, True))
-        affected_rows = conn.total_changes
-        conn.commit()
-        conn.close()
-        return affected_rows
-    except sqlite3.Error as e:
+        conn = get_db_connection()
+        with conn.cursor() as cursor:
+            cursor.execute('UPDATE sanciones SET active = %s WHERE user_id = %s AND active = %s', (False, user_id, True))
+            conn.commit()
+            affected_rows = cursor.rowcount
+            return affected_rows
+    except pymysql.Error as e:
         print(f"Error al borrar sanciones: {e}")
         raise
+    finally:
+        if conn:
+            conn.close()
 
 # =============================================
 # AUTOCOMPLETE PARA SANCIONES
@@ -410,40 +384,60 @@ async def sanction_type_autocomplete(interaction: discord.Interaction, current: 
 def save_rating(staff_id: int, staff_name: str, rating: int, comment: str, user_id: int, user_name: str):
     """Guardar una calificación en la base de datos."""
     rating_id = str(uuid.uuid4())
-    date = datetime.now().isoformat()
-    conn = sqlite3.connect('adminsantiagoRP.db')
-    c = conn.cursor()
-    c.execute('''
-        INSERT INTO calificaciones (rating_id, staff_id, staff_name, rating, comment, user_id, user_name, date)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    ''', (rating_id, staff_id, staff_name, rating, comment, user_id, user_name, date))
-    conn.commit()
-    conn.close()
-    return rating_id
+    date = datetime.now()
+    try:
+        conn = get_db_connection()
+        with conn.cursor() as cursor:
+            cursor.execute('''
+                INSERT INTO calificaciones (rating_id, staff_id, staff_name, rating, comment, user_id, user_name, date)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            ''', (rating_id, staff_id, staff_name, rating, comment, user_id, user_name, date))
+            conn.commit()
+            return rating_id
+    except pymysql.Error as e:
+        print(f"Error al guardar calificación: {e}")
+        raise
+    finally:
+        if conn:
+            conn.close()
 
 def get_top_staff() -> tuple:
     """Obtener el staff con mejor promedio de calificación (mínimo 3 calificaciones)."""
-    conn = sqlite3.connect('adminsantiagoRP.db')
-    c = conn.cursor()
-    c.execute('''
-        SELECT staff_id, staff_name, AVG(rating), COUNT(rating)
-        FROM calificaciones
-        GROUP BY staff_id
-        HAVING COUNT(rating) >= 3
-        ORDER BY AVG(rating) DESC
-        LIMIT 1
-    ''')
-    result = c.fetchone()
-    conn.close()
-    return result  # (staff_id, staff_name, avg_rating, count)
+    try:
+        conn = get_db_connection()
+        with conn.cursor() as cursor:
+            cursor.execute('''
+                SELECT staff_id, staff_name, AVG(rating) as avg_rating, COUNT(rating) as count_rating
+                FROM calificaciones
+                GROUP BY staff_id
+                HAVING COUNT(rating) >= 3
+                ORDER BY AVG(rating) DESC
+                LIMIT 1
+            ''')
+            result = cursor.fetchone()
+            if result:
+                return (result['staff_id'], result['staff_name'], result['avg_rating'], result['count_rating'])
+            return None
+    except pymysql.Error as e:
+        print(f"Error al obtener top staff: {e}")
+        raise
+    finally:
+        if conn:
+            conn.close()
 
 def clear_ratings():
     """Borrar todas las calificaciones de la base de datos."""
-    conn = sqlite3.connect('adminsantiagoRP.db')
-    c = conn.cursor()
-    c.execute('DELETE FROM calificaciones')
-    conn.commit()
-    conn.close()
+    try:
+        conn = get_db_connection()
+        with conn.cursor() as cursor:
+            cursor.execute('DELETE FROM calificaciones')
+            conn.commit()
+    except pymysql.Error as e:
+        print(f"Error al borrar calificaciones: {e}")
+        raise
+    finally:
+        if conn:
+            conn.close()
 
 # =============================================
 # AUTOCOMPLETE
