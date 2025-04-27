@@ -10,6 +10,8 @@ from dotenv import load_dotenv
 import time
 import asyncio
 import pytz
+from discord.interactions import Interaction
+from .constants import Channe
 
 # Cargar variables de entorno
 load_dotenv()
@@ -2712,6 +2714,22 @@ class JobApplicationView(ui.View):
             description=f"La postulación de {self.applicant.mention} al trabajo {JOB_ROLES[self.job_key]['name']} ha sido denegada.",
             color=Colors.SUCCESS
         ), ephemeral=True)
+
+def is_job_applications_channel():
+    """Decorator to restrict a command to the JOB_APPLICATIONS channel."""
+    def predicate(interaction: Interaction) -> bool:
+        if interaction.channel_id != Channels.JOB_APPLICATIONS:
+            embed = create_embed(
+                title="❌ Canal Incorrecto",
+                description=(
+                    f"Este comando solo puede usarse en <#{Channels.JOB_APPLICATIONS}>."
+                ),
+                color=Colors.DANGER
+            )
+            interaction.response.send_message(embed=embed, ephemeral=True)
+            return False
+        return True
+    return app_commands.check(predicate)
 
 @bot.tree.command(name="postular-trabajo", description="Postula a un trabajo en Santiago RP")
 @is_job_applications_channel()
