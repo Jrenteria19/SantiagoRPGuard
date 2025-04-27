@@ -11,7 +11,6 @@ import time
 import asyncio
 import pytz
 from discord.interactions import Interaction
-from constants import Channels
 
 # Cargar variables de entorno
 load_dotenv()
