@@ -1574,59 +1574,128 @@ def is_ratings_channel():
 # FLUJO DE VERIFICACIÓN POR DM
 # =============================
 
-async def iniciar_cuestionario_verificacion(interaction: discord.Interaction):
+# Start the verification questionnaire
+async def iniciar_cuestionario_verificacion(interaction: discord.Interaction, bot):
     preguntas = [
-        "¿Cuál es tu nombre de usuario de Roblox?",
-        "¿Qué buscas en el server?",
-        "¿Cuál es la diferencia entre MG2 y MG?",
-        "¿Qué es RK?",
-        "¿Qué es CK?",
-        "¿Qué es OCC y IC?",
-        "¿Qué es ZZ?",
-        "¿Cómo conociste el servidor?",
-        "¿Del 1/10 qué tan bien crees que roleas?",
-        "¿Sabes de rol?",
-        "¿Sabes las normas del servidor y del rol?"
+        "🎮 ¿Cuál es tu nombre de usuario de Roblox?",
+        "🔍 ¿Qué buscas en el server?",
+        "⚔️ ¿Cuál es la diferencia entre MG2 y MG?",
+        "💥 ¿Qué es RK?",
+        "🗡️ ¿Qué es CK?",
+        "📜 ¿Qué es OCC y IC?",
+        "🛡️ ¿Qué es ZZ?",
+        "🌐 ¿Cómo conociste el servidor?",
+        "⭐ ¿Del 1/10 qué tan bien crees que roleas?",
+        "🎭 ¿Sabes de rol?",
+        "📖 ¿Sabes las normas del servidor y del rol?"
     ]
     respuestas = []
 
-    try:
-        await interaction.user.send("¡Hola! Vamos a comenzar tu verificación para SantiagoRP. Por favor responde a cada pregunta. Si no puedes recibir mensajes, habilita tus DMs.")
-    except discord.Forbidden:
-        await interaction.response.send_message("No puedo enviarte mensajes privados. Por favor, habilita tus DMs y vuelve a intentarlo.", ephemeral=True)
-        return
-
-    await interaction.response.send_message("Te he enviado un mensaje privado con el cuestionario de verificación. ¡Revisa tus DMs!", ephemeral=True)
-
-    def check(m):
-        return m.author.id == interaction.user.id and isinstance(m.channel, discord.DMChannel)
-
-    for pregunta in preguntas:
-        await interaction.user.send(pregunta)
-        try:
-            mensaje = await bot.wait_for('message', check=check, timeout=180)
-            respuestas.append(mensaje.content)
-        except asyncio.TimeoutError:
-            await interaction.user.send("⏰ Tiempo agotado. Si deseas intentarlo de nuevo, usa el botón de verificación otra vez.")
-            return
-
-    # Crear el embed con las respuestas
-    embed = discord.Embed(
-        title="📝 Nueva Solicitud de Verificación",
-        description=f"**Usuario:** {interaction.user.mention} ({interaction.user.id})",
+    # Confirmation step
+    confirm_embed = discord.Embed(
+        title="🌟 ¡Bienvenido a la Verificación de SantiagoRP! 🌟",
+        description=(
+            "Estás a punto de comenzar el cuestionario de verificación. "
+            "Asegúrate de tener tus DMs abiertos y responde con seriedad.\n\n"
+            "📋 **Preguntas**: 11\n"
+            "⏳ **Tiempo por pregunta**: 3 minutos\n"
+            "✅ Presiona el botón para empezar."
+        ),
         color=Colors.PRIMARY,
         timestamp=datetime.now()
     )
-    for i, pregunta in enumerate(preguntas):
-        embed.add_field(name=pregunta, value=respuestas[i], inline=False)
-    embed.set_footer(text="Santiago RP | Sistema de Verificación")
-    embed.set_thumbnail(url=interaction.guild.icon.url if interaction.guild.icon else None)
+    confirm_embed.set_footer(text="Santiago RP | Verificación")
+    confirm_embed.set_thumbnail(url=interaction.guild.icon.url if interaction.guild.icon else None)
 
-    canal_staff = interaction.guild.get_channel(1356740696798924951)
-    if canal_staff:
-        await canal_staff.send(embed=embed)
-    await interaction.user.send("✅ Tu solicitud de verificación fue enviada al staff. ¡Espera respuesta por DM!")
+    view = ui.View()
+    confirm_button = ui.Button(label="Iniciar Verificación", style=discord.ButtonStyle.primary, emoji="🚀")
+    
+    async def confirm_callback(interaction_btn: discord.Interaction):
+        if interaction_btn.user.id != interaction.user.id:
+            await interaction_btn.response.send_message("❌ Solo el usuario que inició puede confirmar.", ephemeral=True)
+            return
+        await interaction_btn.response.send_message("✅ ¡Cuestionario iniciado! Revisa tus DMs.", ephemeral=True)
+        await start_questionnaire(interaction_btn)
+    
+    confirm_button.callback = confirm_callback
+    view.add_item(confirm_button)
 
+    try:
+        await interaction.user.send(embed=confirm_embed, view=view)
+        await interaction.response.send_message("📩 Te he enviado un mensaje privado para iniciar la verificación. ¡Revisa tus DMs!", ephemeral=True)
+    except discord.Forbidden:
+        await interaction.response.send_message("🚫 No puedo enviarte mensajes privados. Habilita tus DMs y vuelve a intentarlo.", ephemeral=True)
+        return
+
+    async def start_questionnaire(interaction_btn):
+        welcome_embed = discord.Embed(
+            title="🎉 ¡Cuestionario de Verificación Iniciado! 🎉",
+            description=(
+                "Responde cada pregunta con claridad y seriedad. "
+                "Tienes **3 minutos** por pregunta. ¡Buena suerte! 🍀"
+            ),
+            color=Colors.PRIMARY
+        )
+        welcome_embed.set_footer(text="Santiago RP | Verificación")
+        await interaction_btn.user.send(embed=welcome_embed)
+
+        def check(m):
+            return m.author.id == interaction_btn.user.id and isinstance(m.channel, discord.DMChannel)
+
+        for i, pregunta in enumerate(preguntas, 1):
+            question_embed = discord.Embed(
+                title=f"Pregunta {i}/{len(preguntas)}",
+                description=pregunta,
+                color=Colors.PRIMARY
+            )
+            question_embed.set_footer(text="Tiempo restante: 3 minutos")
+            await interaction_btn.user.send(embed=question_embed)
+            try:
+                mensaje = await bot.wait_for('message', check=check, timeout=180)
+                respuestas.append(mensaje.content)
+            except asyncio.TimeoutError:
+                timeout_embed = discord.Embed(
+                    title="⏰ ¡Tiempo Agotado!",
+                    description="No respondiste a tiempo. Usa el botón de verificación para intentarlo de nuevo.",
+                    color=Colors.WARNING
+                )
+                await interaction_btn.user.send(embed=timeout_embed)
+                return
+
+        # Create the staff embed with responses
+        embed = discord.Embed(
+            title="📝 Nueva Solicitud de Verificación",
+            description=f"**Usuario:** {interaction_btn.user.mention} ({interaction_btn.user.id})\n"
+                        f"**Nombre en Roblox:** {respuestas[0]}",
+            color=Colors.PRIMARY,
+            timestamp=datetime.now()
+        )
+        for i, pregunta in enumerate(preguntas):
+            embed.add_field(name=pregunta, value=respuestas[i] or "Sin respuesta", inline=False)
+        embed.set_footer(text="Santiago RP | Sistema de Verificación")
+        embed.set_thumbnail(url=interaction_btn.guild.icon.url if interaction_btn.guild.icon else None)
+        embed.set_author(name="SantiagoRP Verificación", icon_url=interaction_btn.guild.icon.url if interaction_btn.guild.icon else None)
+
+        # Attach the staff verification view
+        view = VerificacionStaffView(interaction_btn.user, respuestas[0])
+        
+        canal_staff = interaction_btn.guild.get_channel(1356740696798924951)
+        if canal_staff:
+            await canal_staff.send(embed=embed, view=view)  # Ensure the view is sent with the embed
+        else:
+            await interaction_btn.user.send("⚠️ Error: No se encontró el canal de staff. Contacta a un administrador.")
+            return
+
+        completion_embed = discord.Embed(
+            title="✅ ¡Solicitud Enviada!",
+            description="Tu solicitud de verificación ha sido enviada al staff. "
+                        "Recibirás una respuesta por DM en **24-48 horas**. ¡Gracias por tu paciencia!",
+            color=Colors.SUCCESS
+        )
+        completion_embed.set_footer(text="Santiago RP | Verificación")
+        await interaction_btn.user.send(embed=completion_embed)
+
+# Staff verification view with Accept/Deny buttons
 class VerificacionStaffView(ui.View):
     def __init__(self, usuario, roblox_name):
         super().__init__(timeout=None)
@@ -1642,14 +1711,15 @@ class VerificacionStaffView(ui.View):
         await interaction.response.send_modal(modal)
 
     @ui.button(label="Denegar", style=discord.ButtonStyle.danger, emoji="❌")
-    async def denegar(self, interaction: discord.Interaction, button: ui.Button):
+    async def denegar(self, interaction: discord.Interaction, button_void(self, interaction: discord.Interaction, button: ui.Button):
         if not any(role.id in Roles.STAFF for role in interaction.user.roles):
             await interaction.response.send_message("❌ Solo el staff puede usar este botón.", ephemeral=True)
             return
         modal = RazonStaffModal(self.usuario, self.roblox_name, False)
         await interaction.response.send_modal(modal)
 
-class RazonStaffModal(ui.Modal, title="Motivo de la decisión"):
+# Modal for staff to provide reason
+class RazonStaffModal(ui.Modal, title="Motivo de la Decisión"):
     razon = ui.TextInput(label="Motivo", required=True, style=discord.TextStyle.long)
 
     def __init__(self, usuario, roblox_name, aceptar):
@@ -1662,11 +1732,11 @@ class RazonStaffModal(ui.Modal, title="Motivo de la decisión"):
         try:
             miembro = await interaction.guild.fetch_member(self.usuario.id)
         except Exception:
-            await interaction.response.send_message("No se pudo encontrar al usuario.", ephemeral=True)
+            await interaction.response.send_message("🚫 No se pudo encontrar al usuario.", ephemeral=True)
             return
 
         if self.aceptar:
-            # Agregar roles
+            # Add roles
             roles_a_agregar = [
                 1339386615189209153, 1339386615189209150, 1339386615176630297,
                 1360333071571878231, 1339386615159722121, 1339386615159722120
@@ -1675,41 +1745,44 @@ class RazonStaffModal(ui.Modal, title="Motivo de la decisión"):
                 rol = interaction.guild.get_role(role_id)
                 if rol:
                     await miembro.add_roles(rol)
-            # Quitar rol de no verificado
+            # Remove unverified role
             rol_noverificado = interaction.guild.get_role(1339386615159722119)
             if rol_noverificado:
                 await miembro.remove_roles(rol_noverificado)
-            # Cambiar nombre
+            # Change nickname
             try:
                 await miembro.edit(nick=f"{miembro.display_name} ({self.roblox_name})")
             except Exception:
                 pass
-            # Enviar DM
+            # Send DM
             try:
                 await miembro.send(
                     embed=discord.Embed(
                         title="✅ ¡Verificación Aceptada!",
-                        description=f"¡Felicidades! Has sido verificado para rolear en SantiagoRP.\n\nMotivo del staff: {self.razon.value}",
-                        color=Colors.SUCCESS
-                    )
+                        description=f"¡Felicidades! Has sido verificado para rolear en SantiagoRP.\n\n**Motivo del staff:** {self.razon.value}",
+                        color=Colors.SUCCESS,
+                        timestamp=datetime.now()
+                    ).set_footer(text="Santiago RP | Verificación")
                 )
             except Exception:
                 pass
             await interaction.response.send_message("✅ Usuario verificado y notificado por DM.", ephemeral=True)
         else:
-            # Denegado
+            # Denied
             try:
                 await self.usuario.send(
                     embed=discord.Embed(
                         title="❌ Verificación Denegada",
-                        description=f"Tu verificación fue denegada por el staff.\n\nMotivo: {self.razon.value}",
-                        color=Colors.DANGER
-                    )
+                        description=f"Tu verificación fue denegada por el staff.\n\n**Motivo:** {self.razon.value}",
+                        color=Colors.DANGER,
+                        timestamp=datetime.now()
+                    ).set_footer(text="Santiago RP | Verificación")
                 )
             except Exception:
                 pass
             await interaction.response.send_message("❌ Usuario notificado de la denegación por DM.", ephemeral=True)
 
+# Command to send verification panel
 @bot.tree.command(name="panel-verificacion", description="Enviar panel de verificación (solo staff).")
 async def panel_verificacion(interaction: discord.Interaction):
     if interaction.channel_id != 1339386615688335395:
@@ -1720,25 +1793,28 @@ async def panel_verificacion(interaction: discord.Interaction):
         return
 
     descripcion_panel = (
-        "Bienvenido al sistema de verificación de SantiagoRP.\n\n"
-        "Recuerda que **debes responder usando las normativas del servidor**. "
-        "La aceptación o denegación de tu whitelist puede tardar entre **24 y 48 horas**.\n\n"
-        "El **mal uso** del sistema o **no contestar correctamente las preguntas** puede llevar a un **baneo** o "
-        "suspensión de tu whitelist, ya que buscamos un rol serio y comprometido.\n\n"
-        "¡Suerte y gracias por tu interés en SantiagoRP!"
+        "🌟 **¡Bienvenido al Sistema de Verificación de SantiagoRP!** 🌟\n\n"
+        "Para unirte a nuestra comunidad de rol serio, completa el cuestionario de verificación. "
+        "Responde con **honestidad y detalle** siguiendo las normativas del servidor.\n\n"
+        "⏰ **Tiempo de respuesta**: 24-48 horas\n"
+        "⚠️ **Advertencia**: El mal uso del sistema o respuestas inadecuadas pueden resultar en un **baneo** o suspensión.\n\n"
+        "¡Demuestra tu compromiso y comienza tu aventura en SantiagoRP! 🚀"
     )
     embed = discord.Embed(
-        title="Panel de Verificación",
+        title="🎮 Panel de Verificación",
         description=descripcion_panel,
-        color=Colors.PRIMARY
+        color=Colors.PRIMARY,
+        timestamp=datetime.now()
     )
     embed.set_footer(text="Santiago RP | Sistema de Verificación")
     embed.set_thumbnail(url=interaction.guild.icon.url if interaction.guild.icon else None)
+    embed.set_author(name="SantiagoRP", icon_url=interaction.guild.icon.url if interaction.guild.icon else None)
+
     view = ui.View()
-    view.add_item(ui.Button(label="Verificarme", style=discord.ButtonStyle.primary, custom_id="verificarme_btn"))
+    view.add_item(ui.Button(label="Verificarme", style=discord.ButtonStyle.primary, custom_id="verificarme_btn", emoji="✅"))
 
     async def verificarme_callback(interaction_btn: discord.Interaction):
-        await iniciar_cuestionario_verificacion(interaction_btn)
+        await iniciar_cuestionario_verificacion(interaction_btn, bot)
 
     view.children[0].callback = verificarme_callback
 
