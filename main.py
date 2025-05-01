@@ -1711,7 +1711,7 @@ class VerificacionStaffView(ui.View):
         await interaction.response.send_modal(modal)
 
     @ui.button(label="Denegar", style=discord.ButtonStyle.danger, emoji="❌")
-    async def denegar(self, interaction: discord.Interaction, button_void(self, interaction: discord.Interaction, button: ui.Button):
+    async def denegar(self, interaction: discord.Interaction, button: ui.Button):
         if not any(role.id in Roles.STAFF for role in interaction.user.roles):
             await interaction.response.send_message("❌ Solo el staff puede usar este botón.", ephemeral=True)
             return
