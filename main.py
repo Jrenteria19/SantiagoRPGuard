@@ -1570,6 +1570,158 @@ def is_ratings_channel():
 # COMANDOS Y EVENTOS
 # =============================================
 
+class VerificacionModal(ui.Modal, title="Panel de Verificación SantiagoRP"):
+    roblox = ui.TextInput(label="Nombre de Roblox", required=True)
+    objetivo = ui.TextInput(label="¿Qué buscas en el server?", required=True)
+    mg2mg = ui.TextInput(label="¿Cuál es la diferencia entre MG2 y MG?", required=True)
+    rk = ui.TextInput(label="¿Qué es RK?", required=True)
+    ck = ui.TextInput(label="¿Qué es CK?", required=True)
+    occic = ui.TextInput(label="¿Qué es OCC y IC?", required=True)
+    zz = ui.TextInput(label="¿Qué es ZZ?", required=True)
+    conociste = ui.TextInput(label="¿Cómo conociste el servidor?", required=True)
+    roleo = ui.TextInput(label="¿Del 1/10 qué tan bien crees que roleas?", required=True)
+    sabes_rol = ui.TextInput(label="¿Sabes de rol?", required=True)
+    sabes_normas = ui.TextInput(label="¿Sabes las normas del servidor y del rol?", required=True)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        embed = discord.Embed(
+            title="📝 Nueva Solicitud de Verificación",
+            description=f"**Usuario:** {interaction.user.mention} ({interaction.user.id})",
+            color=Colors.PRIMARY,
+            timestamp=datetime.now()
+        )
+        embed.add_field(name="Nombre de Roblox", value=self.roblox.value, inline=False)
+        embed.add_field(name="¿Qué buscas en el server?", value=self.objetivo.value, inline=False)
+        embed.add_field(name="¿Cuál es la diferencia entre MG2 y MG?", value=self.mg2mg.value, inline=False)
+        embed.add_field(name="¿Qué es RK?", value=self.rk.value, inline=False)
+        embed.add_field(name="¿Qué es CK?", value=self.ck.value, inline=False)
+        embed.add_field(name="¿Qué es OCC y IC?", value=self.occic.value, inline=False)
+        embed.add_field(name="¿Qué es ZZ?", value=self.zz.value, inline=False)
+        embed.add_field(name="¿Cómo conociste el servidor?", value=self.conociste.value, inline=False)
+        embed.add_field(name="¿Del 1/10 qué tan bien crees que roleas?", value=self.roleo.value, inline=False)
+        embed.add_field(name="¿Sabes de rol?", value=self.sabes_rol.value, inline=False)
+        embed.add_field(name="¿Sabes las normas del servidor y del rol?", value=self.sabes_normas.value, inline=False)
+        embed.set_footer(text="Santiago RP | Sistema de Verificación")
+        embed.set_thumbnail(url="https://cdn-icons-png.flaticon.com/512/3135/3135715.png")
+
+        canal_staff = interaction.guild.get_channel(1356740696798924951)
+        if canal_staff:
+            view = VerificacionStaffView(interaction.user, self.roblox.value)
+            await canal_staff.send(embed=embed, view=view)
+        await interaction.response.send_message("✅ Tu solicitud de verificación fue enviada al staff. ¡Espera respuesta por DM!", ephemeral=True)
+
+class VerificacionStaffView(ui.View):
+    def __init__(self, usuario, roblox_name):
+        super().__init__(timeout=None)
+        self.usuario = usuario
+        self.roblox_name = roblox_name
+
+    @ui.button(label="Aceptar", style=discord.ButtonStyle.success, emoji="✅")
+    async def aceptar(self, interaction: discord.Interaction, button: ui.Button):
+        if not any(role.id in Roles.STAFF for role in interaction.user.roles):
+            await interaction.response.send_message("❌ Solo el staff puede usar este botón.", ephemeral=True)
+            return
+        modal = RazonStaffModal(self.usuario, self.roblox_name, True)
+        await interaction.response.send_modal(modal)
+
+    @ui.button(label="Denegar", style=discord.ButtonStyle.danger, emoji="❌")
+    async def denegar(self, interaction: discord.Interaction, button: ui.Button):
+        if not any(role.id in Roles.STAFF for role in interaction.user.roles):
+            await interaction.response.send_message("❌ Solo el staff puede usar este botón.", ephemeral=True)
+            return
+        modal = RazonStaffModal(self.usuario, self.roblox_name, False)
+        await interaction.response.send_modal(modal)
+
+class RazonStaffModal(ui.Modal, title="Motivo de la decisión"):
+    razon = ui.TextInput(label="Motivo", required=True, style=discord.TextStyle.long)
+
+    def __init__(self, usuario, roblox_name, aceptar):
+        super().__init__()
+        self.usuario = usuario
+        self.roblox_name = roblox_name
+        self.aceptar = aceptar
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            miembro = await interaction.guild.fetch_member(self.usuario.id)
+        except Exception:
+            await interaction.response.send_message("No se pudo encontrar al usuario.", ephemeral=True)
+            return
+
+        if self.aceptar:
+            # Agregar roles
+            roles_a_agregar = [
+                1339386615189209153, 1339386615189209150, 1339386615176630297,
+                1360333071571878231, 1339386615159722121, 1339386615159722120
+            ]
+            for role_id in roles_a_agregar:
+                rol = interaction.guild.get_role(role_id)
+                if rol:
+                    await miembro.add_roles(rol)
+            # Quitar rol de no verificado
+            rol_noverificado = interaction.guild.get_role(1339386615159722119)
+            if rol_noverificado:
+                await miembro.remove_roles(rol_noverificado)
+            # Cambiar nombre
+            try:
+                await miembro.edit(nick=f"{miembro.display_name} ({self.roblox_name})")
+            except Exception:
+                pass
+            # Enviar DM
+            try:
+                await miembro.send(
+                    embed=discord.Embed(
+                        title="✅ ¡Verificación Aceptada!",
+                        description=f"¡Felicidades! Has sido verificado para rolear en SantiagoRP.\n\nMotivo del staff: {self.razon.value}",
+                        color=Colors.SUCCESS
+                    )
+                )
+            except Exception:
+                pass
+            await interaction.response.send_message("✅ Usuario verificado y notificado por DM.", ephemeral=True)
+        else:
+            # Denegado
+            try:
+                await self.usuario.send(
+                    embed=discord.Embed(
+                        title="❌ Verificación Denegada",
+                        description=f"Tu verificación fue denegada por el staff.\n\nMotivo: {self.razon.value}",
+                        color=Colors.DANGER
+                    )
+                )
+            except Exception:
+                pass
+            await interaction.response.send_message("❌ Usuario notificado de la denegación por DM.", ephemeral=True)
+
+@bot.tree.command(name="panel-verificacion", description="Enviar panel de verificación (solo staff).")
+async def panel_verificacion(interaction: discord.Interaction):
+    if interaction.channel_id != 1339386615688335395:
+        await interaction.response.send_message("❌ Solo puedes usar este comando en el canal de verificación.", ephemeral=True)
+        return
+    if not any(role.id in Roles.STAFF for role in interaction.user.roles):
+        await interaction.response.send_message("❌ Solo el staff puede usar este comando.", ephemeral=True)
+        return
+
+    embed = discord.Embed(
+        title="🔒 Panel de Verificación SantiagoRP",
+        description=(
+            "¡Bienvenido! Este canal es **exclusivamente para verificarte** y poder rolear en el servidor.\n\n"
+            "Presiona el botón **Verificarme** para comenzar el proceso. El staff revisará tu solicitud."
+        ),
+        color=Colors.PRIMARY
+    )
+    embed.set_footer(text="Santiago RP | Sistema de Verificación")
+    embed.set_thumbnail(url="https://cdn-icons-png.flaticon.com/512/3135/3135715.png")
+    view = ui.View()
+    view.add_item(ui.Button(label="Verificarme", style=discord.ButtonStyle.primary, custom_id="verificarme_btn"))
+
+    async def verificarme_callback(interaction_btn: discord.Interaction):
+        await interaction_btn.response.send_modal(VerificacionModal())
+
+    view.children[0].callback = verificarme_callback
+
+    await interaction.response.send_message(embed=embed, view=view)
+    
 @bot.tree.command(name="advertir-a", description="Advertir a un usuario sobre posibles sanciones.")
 @app_commands.describe(
     usuario="Usuario a advertir",
