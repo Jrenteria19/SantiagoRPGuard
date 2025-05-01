@@ -1574,6 +1574,35 @@ def is_ratings_channel():
 # FLUJO DE VERIFICACIÓN POR DM
 # =============================
 
+import discord
+from discord import ui
+import asyncio
+from datetime import datetime
+import mysql.connector
+from uuid import uuid4
+
+# Configuración de la base de datos (ajusta con tus credenciales)
+db_config = {
+    'host': 'localhost',
+    'user': 'tu_usuario',
+    'password': 'tu_contraseña',
+    'database': 'tu_base_de_datos'
+}
+
+# Clases Colors y Roles (ajusta según tu código)
+class Colors:
+    PRIMARY = discord.Color.blue()
+    SUCCESS = discord.Color.green()
+    DANGER = discord.Color.red()
+    WARNING = discord.Color.orange()
+
+class Roles:
+    STAFF = [123456789, 987654321]  # Reemplaza con los IDs de roles de staff reales    STAFF = [123456789, 987654321]  # Reemplaza con los IDs de roles de staff
+
+# Función para conectar a la base de datos
+def get_db_connection():
+    return mysql.connector.connect(**db_config)
+
 # Start the verification questionnaire
 async def iniciar_cuestionario_verificacion(interaction: discord.Interaction, bot):
     preguntas = [
@@ -1594,6 +1623,28 @@ async def iniciar_cuestionario_verificacion(interaction: discord.Interaction, bo
     # Guardar el guild desde la interacción inicial
     guild = interaction.guild
 
+    # Verificar si el usuario ya tiene una solicitud
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT status FROM verificaciones WHERE user_id = %s", (interaction.user.id,))
+    result = cursor.fetchone()
+    if result:
+        status = result[0]
+        cursor.close()
+        conn.close()
+        if status == 'pendiente':
+            await interaction.response.send_message(
+                "⏳ Ya tienes una solicitud de verificación pendiente. Por favor, espera la respuesta del staff.",
+                ephemeral=True
+            )
+            return
+        elif status in ('aceptado', 'denegado'):
+            await interaction.response.send_message(
+                "✅ Ya has completado el proceso de verificación. No necesitas hacerlo de nuevo.",
+                ephemeral=True
+            )
+            return
+
     # Confirmation step
     confirm_embed = discord.Embed(
         title="🌟 ¡Bienvenido a la Verificación de SantiagoRP! 🌟",
@@ -1610,7 +1661,7 @@ async def iniciar_cuestionario_verificacion(interaction: discord.Interaction, bo
     confirm_embed.set_footer(text="Santiago RP | Verificación")
     confirm_embed.set_thumbnail(url=guild.icon.url if guild and guild.icon else None)
 
-    view = ui.View()
+    view = ui.View(timeout=None)  # Persistir el botón
     confirm_button = ui.Button(label="Iniciar Verificación", style=discord.ButtonStyle.primary, emoji="🚀")
     
     async def confirm_callback(interaction_btn: discord.Interaction):
@@ -1618,7 +1669,7 @@ async def iniciar_cuestionario_verificacion(interaction: discord.Interaction, bo
             await interaction_btn.response.send_message("❌ Solo el usuario que inició puede confirmar.", ephemeral=True)
             return
         await interaction_btn.response.send_message("✅ ¡Cuestionario iniciado! Revisa tus DMs.", ephemeral=True)
-        await start_questionnaire(interaction_btn, guild)  # Pasar el guild
+        await start_questionnaire(interaction_btn, guild, bot)
     
     confirm_button.callback = confirm_callback
     view.add_item(confirm_button)
@@ -1628,9 +1679,11 @@ async def iniciar_cuestionario_verificacion(interaction: discord.Interaction, bo
         await interaction.response.send_message("📩 Te he enviado un mensaje privado para iniciar la verificación. ¡Revisa tus DMs!", ephemeral=True)
     except discord.Forbidden:
         await interaction.response.send_message("🚫 No puedo enviarte mensajes privados. Habilita tus DMs y vuelve a intentarlo.", ephemeral=True)
+        cursor.close()
+        conn.close()
         return
 
-    async def start_questionnaire(interaction_btn, guild):  # Añadir guild como parámetro
+    async def start_questionnaire(interaction_btn, guild, bot):
         welcome_embed = discord.Embed(
             title="🎉 ¡Cuestionario de Verificación Iniciado! 🎉",
             description=(
@@ -1640,7 +1693,7 @@ async def iniciar_cuestionario_verificacion(interaction: discord.Interaction, bo
             color=Colors.PRIMARY
         )
         welcome_embed.set_footer(text="Santiago RP | Verificación")
-        welcome_embed.set_thumbnail(url=guild.icon.url if guild and guild.icon else None)  # Usar el guild pasado
+        welcome_embed.set_thumbnail(url=guild.icon.url if guild and guild.icon else None)
 
         await interaction_btn.user.send(embed=welcome_embed)
 
@@ -1666,7 +1719,16 @@ async def iniciar_cuestionario_verificacion(interaction: discord.Interaction, bo
                     color=Colors.WARNING
                 )
                 await interaction_btn.user.send(embed=timeout_embed)
+                cursor.close()
+                conn.close()
                 return
+
+        # Guardar la solicitud en la base de datos
+        cursor.execute(
+            "INSERT INTO verificaciones (user_id, status, roblox_name) VALUES (%s, %s, %s)",
+            (interaction_btn.user.id, 'pendiente', respuestas[0])
+        )
+        conn.commit()
 
         # Create the staff embed with responses
         embed = discord.Embed(
@@ -1683,69 +1745,21 @@ async def iniciar_cuestionario_verificacion(interaction: discord.Interaction, bo
         embed.set_author(name="SantiagoRP Verificación", icon_url=guild.icon.url if guild and guild.icon else None)
 
         # Attach the staff verification view
-        view = VerificacionStaffView(interaction_btn.user, respuestas[0])
+        view = VerificacionStaffView(interaction_btn.user, respuestas[0], bot)
         
         canal_staff = guild.get_channel(1356740696798924951)
         if canal_staff:
-            await canal_staff.send(embed=embed, view=view)
-        else:
-            await interaction_btn.user.send("⚠️ Error: No se encontró el canal de staff. Contacta a un administrador.")
-            return
-
-        completion_embed = discord.Embed(
-            title="✅ ¡Solicitud Enviada!",
-            description="Tu solicitud de verificación ha sido enviada al staff. "
-                        "Recibirás una respuesta por DM en **24-48 horas**. ¡Gracias por tu paciencia!",
-            color=Colors.SUCCESS
-        )
-        completion_embed.set_footer(text="Santiago RP | Verificación")
-        await interaction_btn.user.send(embed=completion_embed)
-
-        def check(m):
-            return m.author.id == interaction_btn.user.id and isinstance(m.channel, discord.DMChannel)
-
-        for i, pregunta in enumerate(preguntas, 1):
-            question_embed = discord.Embed(
-                title=f"Pregunta {i}/{len(preguntas)}",
-                description=pregunta,
-                color=Colors.PRIMARY
+            message = await canal_staff.send(embed=embed, view=view)
+            # Guardar el ID del mensaje para actualizarlo más tarde
+            cursor.execute(
+                "UPDATE verificaciones SET message_id = %s WHERE user_id = %s",
+                (message.id, interaction_btn.user.id)
             )
-            question_embed.set_footer(text="Tiempo restante: 3 minutos")
-            await interaction_btn.user.send(embed=question_embed)
-            try:
-                mensaje = await bot.wait_for('message', check=check, timeout=180)
-                respuestas.append(mensaje.content)
-            except asyncio.TimeoutError:
-                timeout_embed = discord.Embed(
-                    title="⏰ ¡Tiempo Agotado!",
-                    description="No respondiste a tiempo. Usa el botón de verificación para intentarlo de nuevo.",
-                    color=Colors.WARNING
-                )
-                await interaction_btn.user.send(embed=timeout_embed)
-                return
-
-        # Create the staff embed with responses
-        embed = discord.Embed(
-            title="📝 Nueva Solicitud de Verificación",
-            description=f"**Usuario:** {interaction_btn.user.mention} ({interaction_btn.user.id})\n"
-                        f"**Nombre en Roblox:** {respuestas[0]}",
-            color=Colors.PRIMARY,
-            timestamp=datetime.now()
-        )
-        for i, pregunta in enumerate(preguntas):
-            embed.add_field(name=pregunta, value=respuestas[i] or "Sin respuesta", inline=False)
-        embed.set_footer(text="Santiago RP | Sistema de Verificación")
-        embed.set_thumbnail(url=interaction_btn.guild.icon.url if interaction_btn.guild.icon else None)
-        embed.set_author(name="SantiagoRP Verificación", icon_url=interaction_btn.guild.icon.url if interaction_btn.guild.icon else None)
-
-        # Attach the staff verification view
-        view = VerificacionStaffView(interaction_btn.user, respuestas[0])
-        
-        canal_staff = interaction_btn.guild.get_channel(1356740696798924951)
-        if canal_staff:
-            await canal_staff.send(embed=embed, view=view)  # Ensure the view is sent with the embed
+            conn.commit()
         else:
             await interaction_btn.user.send("⚠️ Error: No se encontró el canal de staff. Contacta a un administrador.")
+            cursor.close()
+            conn.close()
             return
 
         completion_embed = discord.Embed(
@@ -1756,20 +1770,24 @@ async def iniciar_cuestionario_verificacion(interaction: discord.Interaction, bo
         )
         completion_embed.set_footer(text="Santiago RP | Verificación")
         await interaction_btn.user.send(embed=completion_embed)
+
+        cursor.close()
+        conn.close()
 
 # Staff verification view with Accept/Deny buttons
 class VerificacionStaffView(ui.View):
-    def __init__(self, usuario, roblox_name):
+    def __init__(self, usuario, roblox_name, bot):
         super().__init__(timeout=None)
         self.usuario = usuario
         self.roblox_name = roblox_name
+        self.bot = bot
 
     @ui.button(label="Aceptar", style=discord.ButtonStyle.success, emoji="✅")
     async def aceptar(self, interaction: discord.Interaction, button: ui.Button):
         if not any(role.id in Roles.STAFF for role in interaction.user.roles):
             await interaction.response.send_message("❌ Solo el staff puede usar este botón.", ephemeral=True)
             return
-        modal = RazonStaffModal(self.usuario, self.roblox_name, True)
+        modal = RazonStaffModal(self.usuario, self.roblox_name, True, interaction.message, self.bot)
         await interaction.response.send_modal(modal)
 
     @ui.button(label="Denegar", style=discord.ButtonStyle.danger, emoji="❌")
@@ -1777,18 +1795,20 @@ class VerificacionStaffView(ui.View):
         if not any(role.id in Roles.STAFF for role in interaction.user.roles):
             await interaction.response.send_message("❌ Solo el staff puede usar este botón.", ephemeral=True)
             return
-        modal = RazonStaffModal(self.usuario, self.roblox_name, False)
+        modal = RazonStaffModal(self.usuario, self.roblox_name, False, interaction.message, self.bot)
         await interaction.response.send_modal(modal)
 
 # Modal for staff to provide reason
 class RazonStaffModal(ui.Modal, title="Motivo de la Decisión"):
     razon = ui.TextInput(label="Motivo", required=True, style=discord.TextStyle.long)
 
-    def __init__(self, usuario, roblox_name, aceptar):
+    def __init__(self, usuario, roblox_name, aceptar, message, bot):
         super().__init__()
         self.usuario = usuario
         self.roblox_name = roblox_name
         self.aceptar = aceptar
+        self.message = message
+        self.bot = bot
 
     async def on_submit(self, interaction: discord.Interaction):
         try:
@@ -1797,8 +1817,31 @@ class RazonStaffModal(ui.Modal, title="Motivo de la Decisión"):
             await interaction.response.send_message("🚫 No se pudo encontrar al usuario.", ephemeral=True)
             return
 
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Actualizar el estado en la base de datos
+        status = 'aceptado' if self.aceptar else 'denegado'
+        cursor.execute(
+            "UPDATE verificaciones SET status = %s WHERE user_id = %s",
+            (status, self.usuario.id)
+        )
+        conn.commit()
+
+        # Actualizar el embed del staff
+        updated_embed = self.message.embeds[0]
+        updated_embed.color = Colors.SUCCESS if self.aceptar else Colors.DANGER
+        updated_embed.add_field(
+            name="Decisión del Staff",
+            value=f"**Estado:** {'Aceptado' if self.aceptar else 'Denegado'}\n"
+                  f"**Motivo:** {self.razon.value}\n"
+                  f"**Staff:** {interaction.user.mention}",
+            inline=False
+        )
+        await self.message.edit(embed=updated_embed, view=None)  # Eliminar los botones
+
         if self.aceptar:
-            # Add roles
+            # Agregar roles
             roles_a_agregar = [
                 1339386615189209153, 1339386615189209150, 1339386615176630297,
                 1360333071571878231, 1339386615159722121, 1339386615159722120
@@ -1807,16 +1850,16 @@ class RazonStaffModal(ui.Modal, title="Motivo de la Decisión"):
                 rol = interaction.guild.get_role(role_id)
                 if rol:
                     await miembro.add_roles(rol)
-            # Remove unverified role
+            # Quitar rol de no verificado
             rol_noverificado = interaction.guild.get_role(1339386615159722119)
             if rol_noverificado:
                 await miembro.remove_roles(rol_noverificado)
-            # Change nickname
+            # Cambiar nickname
             try:
                 await miembro.edit(nick=f"{miembro.display_name} ({self.roblox_name})")
             except Exception:
                 pass
-            # Send DM
+            # Enviar DM
             try:
                 await miembro.send(
                     embed=discord.Embed(
@@ -1830,7 +1873,7 @@ class RazonStaffModal(ui.Modal, title="Motivo de la Decisión"):
                 pass
             await interaction.response.send_message("✅ Usuario verificado y notificado por DM.", ephemeral=True)
         else:
-            # Denied
+            # Denegado
             try:
                 await self.usuario.send(
                     embed=discord.Embed(
@@ -1843,6 +1886,9 @@ class RazonStaffModal(ui.Modal, title="Motivo de la Decisión"):
             except Exception:
                 pass
             await interaction.response.send_message("❌ Usuario notificado de la denegación por DM.", ephemeral=True)
+
+        cursor.close()
+        conn.close()
 
 # Command to send verification panel
 @bot.tree.command(name="panel-verificacion", description="Enviar panel de verificación (solo staff).")
@@ -1872,7 +1918,7 @@ async def panel_verificacion(interaction: discord.Interaction):
     embed.set_thumbnail(url=interaction.guild.icon.url if interaction.guild.icon else None)
     embed.set_author(name="SantiagoRP", icon_url=interaction.guild.icon.url if interaction.guild.icon else None)
 
-    view = ui.View()
+    view = ui.View(timeout=None)
     view.add_item(ui.Button(label="Verificarme", style=discord.ButtonStyle.primary, custom_id="verificarme_btn", emoji="✅"))
 
     async def verificarme_callback(interaction_btn: discord.Interaction):
@@ -1881,87 +1927,6 @@ async def panel_verificacion(interaction: discord.Interaction):
     view.children[0].callback = verificarme_callback
 
     await interaction.response.send_message(embed=embed, view=view)
-    
-@bot.tree.command(name="advertir-a", description="Advertir a un usuario sobre posibles sanciones.")
-@app_commands.describe(
-    usuario="Usuario a advertir",
-    razon="Razón de la advertencia",
-    prueba="URL de la prueba (opcional)"
-)
-async def advertir_a(interaction: discord.Interaction, usuario: discord.Member, razon: str, prueba: str = None):
-    """Comando para advertir a un usuario sobre posibles sanciones."""
-    # Verificar canal
-    if interaction.channel_id != 1358216083953291467:
-        await interaction.response.send_message(
-            "❌ Este comando solo puede usarse en el canal autorizado.", ephemeral=True
-        )
-        return
-
-    # Verificar roles de staff
-    staff_roles = set(Roles.STAFF)
-    user_roles = set([role.id for role in interaction.user.roles])
-    if not staff_roles.intersection(user_roles):
-        await interaction.response.send_message(
-            "❌ Solo el staff puede usar este comando.", ephemeral=True
-        )
-        return
-
-    await interaction.response.defer(ephemeral=True)
-    admin = interaction.user
-
-    # Crear embed llamativo para el usuario advertido
-    advertencia_embed = discord.Embed(
-        title="⚠️ ¡Advertencia emitida!",
-        description=(
-            f"**👤 Usuario advertido:** {usuario.mention} ({usuario.id})\n"
-            f"**🛡️ Staff:** {admin.mention} ({admin.id})\n"
-            f"**📄 Razón:** {razon}\n"
-            f"{f'**📎 Prueba:** {prueba}\n' if prueba else ''}"
-            "\n\n🔔 **Recuerda:** Puedes recibir una sanción de los grados existentes (**Advertencia 1, 2, 3**), aislamiento o incluso un **baneo** si reincides o la falta es grave.\n"
-            "Por favor, toma en serio esta advertencia y mejora tu comportamiento en el servidor."
-        ),
-        color=Colors.WARNING,
-        timestamp=datetime.now()
-    )
-    advertencia_embed.set_footer(text="Santiago RP | Sistema de Advertencias")
-    advertencia_embed.set_thumbnail(url="https://cdn-icons-png.flaticon.com/512/564/564619.png")
-
-    dm_ok = True
-    try:
-        await usuario.send(embed=advertencia_embed)
-    except Exception as e:
-        dm_ok = False
-
-    # Enviar embed público en el canal donde se ejecutó el comando (NO efímero)
-    await interaction.channel.send(embed=advertencia_embed)
-
-    # Log en canal específico
-    log_channel_id = 1367389708597858314
-    log_channel = interaction.guild.get_channel(log_channel_id)
-    if log_channel:
-        await log_channel.send(embed=create_embed(
-            title="Usuario Advertido",
-            description=(
-                f"**Usuario:** {usuario.mention} ({usuario.id})\n"
-                f"**Staff:** {admin.mention} ({admin.id})\n"
-                f"**Razón:** {razon}\n"
-                f"{f'**Prueba:** {prueba}' if prueba else ''}\n"
-                f"**DM enviado:** {'Sí' if dm_ok else 'No (no se pudo enviar)'}"
-            ),
-            color=Colors.WARNING,
-            user=admin
-        ))
-
-    # Respuesta al staff (efímera)
-    await interaction.followup.send(
-        embed=create_embed(
-            title="Usuario Advertido",
-            description=f"El usuario {usuario.mention} ha sido advertido correctamente." if dm_ok else f"No se pudo enviar DM a {usuario.mention}, pero la advertencia fue registrada.",
-            color=Colors.SUCCESS if dm_ok else Colors.DANGER,
-            user=admin
-        ),
-        ephemeral=True
-    )
 
 async def weekly_top_staff_announcement():
     await bot.wait_until_ready()
