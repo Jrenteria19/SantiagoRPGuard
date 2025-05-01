@@ -1597,23 +1597,25 @@ async def advertir_a(interaction: discord.Interaction, usuario: discord.Member, 
     await interaction.response.defer(ephemeral=True)
     admin = interaction.user
 
-    advertencia = (
-        f"⚠️ Has sido advertido por el staff.\n\n"
-        f"**Razón:** {razon}\n"
-        f"**Advertencia:** Puedes recibir una sanción de los grados existentes (Advertencia 1, 2, 3), aislamiento o incluso un baneo si reincides o la falta es grave.\n"
+    # Crear embed llamativo para el usuario advertido
+    advertencia_embed = discord.Embed(
+        title="⚠️ ¡Has sido advertido por el Staff!",
+        description=(
+            f"**Razón:** {razon}\n\n"
+            f"**Advertencia:** Puedes recibir una sanción de los grados existentes (**Advertencia 1, 2, 3**), "
+            f"aislamiento o incluso un **baneo** si reincides o la falta es grave.\n"
+            f"{f'**Prueba:** {prueba}\n' if prueba else ''}"
+            "\n\n🔔 **Por favor, toma en serio esta advertencia y mejora tu comportamiento en el servidor.**"
+        ),
+        color=Colors.WARNING,
+        timestamp=datetime.now()
     )
-    if prueba:
-        advertencia += f"**Prueba:** {prueba}\n"
+    advertencia_embed.set_footer(text="Santiago RP | Sistema de Advertencias")
+    advertencia_embed.set_thumbnail(url="https://cdn-icons-png.flaticon.com/512/564/564619.png")
 
-    # Enviar DM al usuario advertido
     dm_ok = True
     try:
-        await usuario.send(embed=create_embed(
-            title="Advertencia del Staff",
-            description=advertencia,
-            color=Colors.WARNING,
-            user=usuario
-        ))
+        await usuario.send(embed=advertencia_embed)
     except Exception as e:
         dm_ok = False
 
@@ -1688,7 +1690,7 @@ async def on_ready():
         synced = await bot.tree.sync()
         print(f"🔁 Comandos sincronizados: {', '.join([cmd.name for cmd in synced])}")
         # Calcular el número de miembros sin bots
-        guild = bot.get_guild(1357151555706683473)  # Reemplaza con el ID de tu servidor
+        guild = bot.get_guild(1339386615147266108)  # Reemplaza con el ID de tu servidor
         if guild:
             member_count = sum(1 for member in guild.members if not member.bot)
             # Establecer actividad personalizada
@@ -3096,6 +3098,32 @@ async def postular_trabajo(interaction: discord.Interaction, trabajo: str, razon
         log_embed.add_field(name="💼 Trabajo", value=JOB_ROLES[trabajo]['name'], inline=True)
         log_embed.add_field(name="📝 Razón", value=razon, inline=False)
         await log_channel.send(embed=log_embed)
+
+# =============================================
+# ACTUALIZAR CANAL DE CONTEO DE USUARIOS
+# =============================================
+@bot.event
+async def on_member_join(member):
+    if member.bot:
+        return
+    await actualizar_canal_conteo_miembros(member.guild)
+
+@bot.event
+async def on_member_remove(member):
+    if member.bot:
+        return
+    await actualizar_canal_conteo_miembros(member.guild)
+
+async def actualizar_canal_conteo_miembros(guild):
+    canal_id = 1367394876479766580  # ID del canal a actualizar
+    canal = guild.get_channel(canal_id)
+    if canal:
+        conteo = sum(1 for m in guild.members if not m.bot)
+        nuevo_nombre = f"👥 Usuarios: {conteo}"
+        try:
+            await canal.edit(name=nuevo_nombre)
+        except Exception as e:
+            print(f"Error al actualizar el nombre del canal: {e}")
 
 # =============================================
 # INICIAR BOT
