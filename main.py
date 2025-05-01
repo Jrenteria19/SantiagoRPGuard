@@ -1570,18 +1570,58 @@ def is_ratings_channel():
 # COMANDOS Y EVENTOS
 # =============================================
 
-class VerificacionModal(ui.Modal, title="Panel de Verificación SantiagoRP"):
+class VerificacionModal1(ui.Modal, title="Verificación SantiagoRP (1/3)"):
     roblox = ui.TextInput(label="Nombre de Roblox", required=True)
     objetivo = ui.TextInput(label="¿Qué buscas en el server?", required=True)
     mg2mg = ui.TextInput(label="¿Cuál es la diferencia entre MG2 y MG?", required=True)
     rk = ui.TextInput(label="¿Qué es RK?", required=True)
     ck = ui.TextInput(label="¿Qué es CK?", required=True)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.send_modal(
+            VerificacionModal2(
+                self.roblox.value, self.objetivo.value, self.mg2mg.value, self.rk.value, self.ck.value
+            )
+        )
+
+class VerificacionModal2(ui.Modal, title="Verificación SantiagoRP (2/3)"):
     occic = ui.TextInput(label="¿Qué es OCC y IC?", required=True)
     zz = ui.TextInput(label="¿Qué es ZZ?", required=True)
     conociste = ui.TextInput(label="¿Cómo conociste el servidor?", required=True)
     roleo = ui.TextInput(label="¿Del 1/10 qué tan bien crees que roleas?", required=True)
     sabes_rol = ui.TextInput(label="¿Sabes de rol?", required=True)
+
+    def __init__(self, roblox, objetivo, mg2mg, rk, ck):
+        super().__init__()
+        self.roblox = roblox
+        self.objetivo = objetivo
+        self.mg2mg = mg2mg
+        self.rk = rk
+        self.ck = ck
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.send_modal(
+            VerificacionModal3(
+                self.roblox, self.objetivo, self.mg2mg, self.rk, self.ck,
+                self.occic.value, self.zz.value, self.conociste.value, self.roleo.value, self.sabes_rol.value
+            )
+        )
+
+class VerificacionModal3(ui.Modal, title="Verificación SantiagoRP (3/3)"):
     sabes_normas = ui.TextInput(label="¿Sabes las normas del servidor y del rol?", required=True)
+
+    def __init__(self, roblox, objetivo, mg2mg, rk, ck, occic, zz, conociste, roleo, sabes_rol):
+        super().__init__()
+        self.roblox = roblox
+        self.objetivo = objetivo
+        self.mg2mg = mg2mg
+        self.rk = rk
+        self.ck = ck
+        self.occic = occic
+        self.zz = zz
+        self.conociste = conociste
+        self.roleo = roleo
+        self.sabes_rol = sabes_rol
 
     async def on_submit(self, interaction: discord.Interaction):
         embed = discord.Embed(
@@ -1590,23 +1630,23 @@ class VerificacionModal(ui.Modal, title="Panel de Verificación SantiagoRP"):
             color=Colors.PRIMARY,
             timestamp=datetime.now()
         )
-        embed.add_field(name="Nombre de Roblox", value=self.roblox.value, inline=False)
-        embed.add_field(name="¿Qué buscas en el server?", value=self.objetivo.value, inline=False)
-        embed.add_field(name="¿Cuál es la diferencia entre MG2 y MG?", value=self.mg2mg.value, inline=False)
-        embed.add_field(name="¿Qué es RK?", value=self.rk.value, inline=False)
-        embed.add_field(name="¿Qué es CK?", value=self.ck.value, inline=False)
-        embed.add_field(name="¿Qué es OCC y IC?", value=self.occic.value, inline=False)
-        embed.add_field(name="¿Qué es ZZ?", value=self.zz.value, inline=False)
-        embed.add_field(name="¿Cómo conociste el servidor?", value=self.conociste.value, inline=False)
-        embed.add_field(name="¿Del 1/10 qué tan bien crees que roleas?", value=self.roleo.value, inline=False)
-        embed.add_field(name="¿Sabes de rol?", value=self.sabes_rol.value, inline=False)
+        embed.add_field(name="Nombre de Roblox", value=self.roblox, inline=False)
+        embed.add_field(name="¿Qué buscas en el server?", value=self.objetivo, inline=False)
+        embed.add_field(name="¿Cuál es la diferencia entre MG2 y MG?", value=self.mg2mg, inline=False)
+        embed.add_field(name="¿Qué es RK?", value=self.rk, inline=False)
+        embed.add_field(name="¿Qué es CK?", value=self.ck, inline=False)
+        embed.add_field(name="¿Qué es OCC y IC?", value=self.occic, inline=False)
+        embed.add_field(name="¿Qué es ZZ?", value=self.zz, inline=False)
+        embed.add_field(name="¿Cómo conociste el servidor?", value=self.conociste, inline=False)
+        embed.add_field(name="¿Del 1/10 qué tan bien crees que roleas?", value=self.roleo, inline=False)
+        embed.add_field(name="¿Sabes de rol?", value=self.sabes_rol, inline=False)
         embed.add_field(name="¿Sabes las normas del servidor y del rol?", value=self.sabes_normas.value, inline=False)
         embed.set_footer(text="Santiago RP | Sistema de Verificación")
         embed.set_thumbnail(url="https://cdn-icons-png.flaticon.com/512/3135/3135715.png")
 
         canal_staff = interaction.guild.get_channel(1356740696798924951)
         if canal_staff:
-            view = VerificacionStaffView(interaction.user, self.roblox.value)
+            view = VerificacionStaffView(interaction.user, self.roblox)
             await canal_staff.send(embed=embed, view=view)
         await interaction.response.send_message("✅ Tu solicitud de verificación fue enviada al staff. ¡Espera respuesta por DM!", ephemeral=True)
 
@@ -1711,12 +1751,12 @@ async def panel_verificacion(interaction: discord.Interaction):
         color=Colors.PRIMARY
     )
     embed.set_footer(text="Santiago RP | Sistema de Verificación")
-    embed.set_thumbnail(url="https://cdn-icons-png.flaticon.com/512/3135/3135715.png")
+    embed.set_thumbnail(url=interaction.guild.icon.url if interaction.guild.icon else discord.Embed.Empty)
     view = ui.View()
     view.add_item(ui.Button(label="Verificarme", style=discord.ButtonStyle.primary, custom_id="verificarme_btn"))
 
     async def verificarme_callback(interaction_btn: discord.Interaction):
-        await interaction_btn.response.send_modal(VerificacionModal())
+        await interaction_btn.response.send_modal(VerificacionModal1())
 
     view.children[0].callback = verificarme_callback
 
