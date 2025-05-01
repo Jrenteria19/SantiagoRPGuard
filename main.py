@@ -1599,13 +1599,14 @@ async def advertir_a(interaction: discord.Interaction, usuario: discord.Member, 
 
     # Crear embed llamativo para el usuario advertido
     advertencia_embed = discord.Embed(
-        title="⚠️ ¡Has sido advertido por el Staff!",
+        title="⚠️ ¡Advertencia emitida!",
         description=(
-            f"**Razón:** {razon}\n\n"
-            f"**Advertencia:** Puedes recibir una sanción de los grados existentes (**Advertencia 1, 2, 3**), "
-            f"aislamiento o incluso un **baneo** si reincides o la falta es grave.\n"
-            f"{f'**Prueba:** {prueba}\n' if prueba else ''}"
-            "\n\n🔔 **Por favor, toma en serio esta advertencia y mejora tu comportamiento en el servidor.**"
+            f"**👤 Usuario advertido:** {usuario.mention} ({usuario.id})\n"
+            f"**🛡️ Staff:** {admin.mention} ({admin.id})\n"
+            f"**📄 Razón:** {razon}\n"
+            f"{f'**📎 Prueba:** {prueba}\n' if prueba else ''}"
+            "\n\n🔔 **Recuerda:** Puedes recibir una sanción de los grados existentes (**Advertencia 1, 2, 3**), aislamiento o incluso un **baneo** si reincides o la falta es grave.\n"
+            "Por favor, toma en serio esta advertencia y mejora tu comportamiento en el servidor."
         ),
         color=Colors.WARNING,
         timestamp=datetime.now()
@@ -1618,6 +1619,9 @@ async def advertir_a(interaction: discord.Interaction, usuario: discord.Member, 
         await usuario.send(embed=advertencia_embed)
     except Exception as e:
         dm_ok = False
+
+    # Enviar embed público en el canal donde se ejecutó el comando (NO efímero)
+    await interaction.channel.send(embed=advertencia_embed)
 
     # Log en canal específico
     log_channel_id = 1367389708597858314
@@ -1636,7 +1640,7 @@ async def advertir_a(interaction: discord.Interaction, usuario: discord.Member, 
             user=admin
         ))
 
-    # Respuesta al staff
+    # Respuesta al staff (efímera)
     await interaction.followup.send(
         embed=create_embed(
             title="Usuario Advertido",
@@ -1683,7 +1687,6 @@ async def weekly_top_staff_announcement():
 
 @bot.event
 async def on_ready():
-    """Evento que se ejecuta cuando el bot está listo."""
     print(f'✨ {bot.user.name} está listo!')
     try:
         # Sincronizar comandos
@@ -1702,6 +1705,9 @@ async def on_ready():
             print(f"🎮 Actividad establecida: {activity.name}")
         else:
             print("❌ No se encontró el servidor. Verifica el ID del servidor.")
+        # Actualizar canal de conteo de miembros al iniciar
+        for guild in bot.guilds:
+            await actualizar_canal_conteo_miembros(guild)
     except Exception as e:
         print(f"❌ Error en on_ready: {e}")
     # Inicia la tarea de fondo para el staff destacado semanal
