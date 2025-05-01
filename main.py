@@ -1327,17 +1327,7 @@ async def handle_server_start(interaction: discord.Interaction):
         await mention1.delete()
         await mention2.delete()
         
-        log_embed = create_embed(
-            title="📢 Servidor Abierto",
-            description=f"Acción realizada por {interaction.user.mention}",
-            color=embed.color,
-            user=interaction.user
-        )
-        
-        log_channel = bot.get_channel(Channels.LOGS)
-        await log_channel.send(embed=log_embed)
         print(f"✅ Anuncio enviado al canal {Channels.ANNOUNCEMENTS}")
-        print(f"✅ Log enviado al canal {Channels.LOGS}")
     except discord.errors.Forbidden:
         print(f"❌ Error: El bot no tiene permisos para gestionar el canal {Channels.ANNOUNCEMENTS} o enviar mensajes")
         await interaction.followup.send(embed=create_embed(
@@ -1426,17 +1416,7 @@ async def handle_server_close(interaction: discord.Interaction):
         await mention1.delete()
         await mention2.delete()
         
-        log_embed = create_embed(
-            title="📢 Servidor Cerrado",
-            description=f"Acción realizada por {interaction.user.mention}\n**Razón:** {reason}",
-            color=embed.color,
-            user=interaction.user
-        )
-        
-        log_channel = bot.get_channel(Channels.LOGS)
-        await log_channel.send(embed=log_embed)
         print(f"✅ Anuncio enviado al canal {Channels.ANNOUNCEMENTS}")
-        print(f"✅ Log enviado al canal {Channels.LOGS}")
     except discord.errors.Forbidden:
         print(f"❌ Error: El bot no tiene permisos para gestionar el canal {Channels.ANNOUNCEMENTS} o enviar mensajes")
         await modal.interaction.followup.send(embed=create_embed(
@@ -1542,17 +1522,7 @@ async def handle_vote_start(interaction: discord.Interaction):
         await mention1.delete()
         await mention2.delete()
         
-        log_embed = create_embed(
-            title="📢 Votación Iniciada",
-            description=f"Acción realizada por {interaction.user.mention}",
-            color=embed.color,
-            user=interaction.user
-        )
-        
-        log_channel = bot.get_channel(Channels.LOGS)
-        await log_channel.send(embed=log_embed)
         print(f"✅ Anuncio enviado al canal {Channels.ANNOUNCEMENTS}")
-        print(f"✅ Log enviado al canal {Channels.LOGS}")
     except discord.errors.Forbidden:
         print(f"❌ Error: El bot no tiene permisos para gestionar el canal {Channels.ANNOUNCEMENTS} o enviar mensajes")
         await modal.interaction.followup.send(embed=create_embed(
@@ -1608,6 +1578,22 @@ def is_ratings_channel():
 )
 async def advertir_a(interaction: discord.Interaction, usuario: discord.Member, razon: str, prueba: str = None):
     """Comando para advertir a un usuario sobre posibles sanciones."""
+    # Verificar canal
+    if interaction.channel_id != 1358216083953291467:
+        await interaction.response.send_message(
+            "❌ Este comando solo puede usarse en el canal autorizado.", ephemeral=True
+        )
+        return
+
+    # Verificar roles de staff
+    staff_roles = set(Roles.STAFF)
+    user_roles = set([role.id for role in interaction.user.roles])
+    if not staff_roles.intersection(user_roles):
+        await interaction.response.send_message(
+            "❌ Solo el staff puede usar este comando.", ephemeral=True
+        )
+        return
+
     await interaction.response.defer(ephemeral=True)
     admin = interaction.user
 
