@@ -1570,85 +1570,62 @@ def is_ratings_channel():
 # COMANDOS Y EVENTOS
 # =============================================
 
-class VerificacionModal1(ui.Modal, title="Verificación SantiagoRP (1/3)"):
-    roblox = ui.TextInput(label="Nombre de Roblox", required=True)
-    objetivo = ui.TextInput(label="¿Qué buscas en el server?", required=True)
-    mg2mg = ui.TextInput(label="¿Cuál es la diferencia entre MG2 y MG?", required=True)
-    rk = ui.TextInput(label="¿Qué es RK?", required=True)
-    ck = ui.TextInput(label="¿Qué es CK?", required=True)
+# =============================
+# FLUJO DE VERIFICACIÓN POR DM
+# =============================
 
-    async def on_submit(self, interaction: discord.Interaction):
-        await interaction.response.send_modal(
-            VerificacionModal2(
-                self.roblox.value, self.objetivo.value, self.mg2mg.value, self.rk.value, self.ck.value
-            )
-        )
+async def iniciar_cuestionario_verificacion(interaction: discord.Interaction):
+    preguntas = [
+        "¿Cuál es tu nombre de usuario de Roblox?",
+        "¿Qué buscas en el server?",
+        "¿Cuál es la diferencia entre MG2 y MG?",
+        "¿Qué es RK?",
+        "¿Qué es CK?",
+        "¿Qué es OCC y IC?",
+        "¿Qué es ZZ?",
+        "¿Cómo conociste el servidor?",
+        "¿Del 1/10 qué tan bien crees que roleas?",
+        "¿Sabes de rol?",
+        "¿Sabes las normas del servidor y del rol?"
+    ]
+    respuestas = []
 
-class VerificacionModal2(ui.Modal, title="Verificación SantiagoRP (2/3)"):
-    occic = ui.TextInput(label="¿Qué es OCC y IC?", required=True)
-    zz = ui.TextInput(label="¿Qué es ZZ?", required=True)
-    conociste = ui.TextInput(label="¿Cómo conociste el servidor?", required=True)
-    roleo = ui.TextInput(label="¿Del 1/10 qué tan bien crees que roleas?", required=True)
-    sabes_rol = ui.TextInput(label="¿Sabes de rol?", required=True)
+    try:
+        await interaction.user.send("¡Hola! Vamos a comenzar tu verificación para SantiagoRP. Por favor responde a cada pregunta. Si no puedes recibir mensajes, habilita tus DMs.")
+    except discord.Forbidden:
+        await interaction.response.send_message("No puedo enviarte mensajes privados. Por favor, habilita tus DMs y vuelve a intentarlo.", ephemeral=True)
+        return
 
-    def __init__(self, roblox, objetivo, mg2mg, rk, ck):
-        super().__init__()
-        self.roblox = roblox
-        self.objetivo = objetivo
-        self.mg2mg = mg2mg
-        self.rk = rk
-        self.ck = ck
+    await interaction.response.send_message("Te he enviado un mensaje privado con el cuestionario de verificación. ¡Revisa tus DMs!", ephemeral=True)
 
-    async def on_submit(self, interaction: discord.Interaction):
-        await interaction.response.send_modal(
-            VerificacionModal3(
-                self.roblox, self.objetivo, self.mg2mg, self.rk, self.ck,
-                self.occic.value, self.zz.value, self.conociste.value, self.roleo.value, self.sabes_rol.value
-            )
-        )
+    def check(m):
+        return m.author.id == interaction.user.id and isinstance(m.channel, discord.DMChannel)
 
-class VerificacionModal3(ui.Modal, title="Verificación SantiagoRP (3/3)"):
-    sabes_normas = ui.TextInput(label="¿Sabes las normas del servidor y del rol?", required=True)
+    for pregunta in preguntas:
+        await interaction.user.send(pregunta)
+        try:
+            mensaje = await bot.wait_for('message', check=check, timeout=180)
+            respuestas.append(mensaje.content)
+        except asyncio.TimeoutError:
+            await interaction.user.send("⏰ Tiempo agotado. Si deseas intentarlo de nuevo, usa el botón de verificación otra vez.")
+            return
 
-    def __init__(self, roblox, objetivo, mg2mg, rk, ck, occic, zz, conociste, roleo, sabes_rol):
-        super().__init__()
-        self.roblox = roblox
-        self.objetivo = objetivo
-        self.mg2mg = mg2mg
-        self.rk = rk
-        self.ck = ck
-        self.occic = occic
-        self.zz = zz
-        self.conociste = conociste
-        self.roleo = roleo
-        self.sabes_rol = sabes_rol
+    # Crear el embed con las respuestas
+    embed = discord.Embed(
+        title="📝 Nueva Solicitud de Verificación",
+        description=f"**Usuario:** {interaction.user.mention} ({interaction.user.id})",
+        color=Colors.PRIMARY,
+        timestamp=datetime.now()
+    )
+    for i, pregunta in enumerate(preguntas):
+        embed.add_field(name=pregunta, value=respuestas[i], inline=False)
+    embed.set_footer(text="Santiago RP | Sistema de Verificación")
+    embed.set_thumbnail(url=interaction.guild.icon.url if interaction.guild.icon else None)
 
-    async def on_submit(self, interaction: discord.Interaction):
-        embed = discord.Embed(
-            title="📝 Nueva Solicitud de Verificación",
-            description=f"**Usuario:** {interaction.user.mention} ({interaction.user.id})",
-            color=Colors.PRIMARY,
-            timestamp=datetime.now()
-        )
-        embed.add_field(name="Nombre de Roblox", value=self.roblox, inline=False)
-        embed.add_field(name="¿Qué buscas en el server?", value=self.objetivo, inline=False)
-        embed.add_field(name="¿Cuál es la diferencia entre MG2 y MG?", value=self.mg2mg, inline=False)
-        embed.add_field(name="¿Qué es RK?", value=self.rk, inline=False)
-        embed.add_field(name="¿Qué es CK?", value=self.ck, inline=False)
-        embed.add_field(name="¿Qué es OCC y IC?", value=self.occic, inline=False)
-        embed.add_field(name="¿Qué es ZZ?", value=self.zz, inline=False)
-        embed.add_field(name="¿Cómo conociste el servidor?", value=self.conociste, inline=False)
-        embed.add_field(name="¿Del 1/10 qué tan bien crees que roleas?", value=self.roleo, inline=False)
-        embed.add_field(name="¿Sabes de rol?", value=self.sabes_rol, inline=False)
-        embed.add_field(name="¿Sabes las normas del servidor y del rol?", value=self.sabes_normas.value, inline=False)
-        embed.set_footer(text="Santiago RP | Sistema de Verificación")
-        embed.set_thumbnail(url="https://cdn-icons-png.flaticon.com/512/3135/3135715.png")
-
-        canal_staff = interaction.guild.get_channel(1356740696798924951)
-        if canal_staff:
-            view = VerificacionStaffView(interaction.user, self.roblox)
-            await canal_staff.send(embed=embed, view=view)
-        await interaction.response.send_message("✅ Tu solicitud de verificación fue enviada al staff. ¡Espera respuesta por DM!", ephemeral=True)
+    canal_staff = interaction.guild.get_channel(1356740696798924951)
+    if canal_staff:
+        await canal_staff.send(embed=embed)
+    await interaction.user.send("✅ Tu solicitud de verificación fue enviada al staff. ¡Espera respuesta por DM!")
 
 class VerificacionStaffView(ui.View):
     def __init__(self, usuario, roblox_name):
@@ -1742,21 +1719,26 @@ async def panel_verificacion(interaction: discord.Interaction):
         await interaction.response.send_message("❌ Solo el staff puede usar este comando.", ephemeral=True)
         return
 
+    descripcion_panel = (
+        "Bienvenido al sistema de verificación de SantiagoRP.\n\n"
+        "Recuerda que **debes responder usando las normativas del servidor**. "
+        "La aceptación o denegación de tu whitelist puede tardar entre **24 y 48 horas**.\n\n"
+        "El **mal uso** del sistema o **no contestar correctamente las preguntas** puede llevar a un **baneo** o "
+        "suspensión de tu whitelist, ya que buscamos un rol serio y comprometido.\n\n"
+        "¡Suerte y gracias por tu interés en SantiagoRP!"
+    )
     embed = discord.Embed(
-        title="🔒 Panel de Verificación SantiagoRP",
-        description=(
-            "¡Bienvenido! Este canal es **exclusivamente para verificarte** y poder rolear en el servidor.\n\n"
-            "Presiona el botón **Verificarme** para comenzar el proceso. El staff revisará tu solicitud."
-        ),
+        title="Panel de Verificación",
+        description=descripcion_panel,
         color=Colors.PRIMARY
     )
     embed.set_footer(text="Santiago RP | Sistema de Verificación")
-    embed.set_thumbnail(url=interaction.guild.icon.url if interaction.guild.icon else discord.Embed.Empty)
+    embed.set_thumbnail(url=interaction.guild.icon.url if interaction.guild.icon else None)
     view = ui.View()
     view.add_item(ui.Button(label="Verificarme", style=discord.ButtonStyle.primary, custom_id="verificarme_btn"))
 
     async def verificarme_callback(interaction_btn: discord.Interaction):
-        await interaction_btn.response.send_modal(VerificacionModal1())
+        await iniciar_cuestionario_verificacion(interaction_btn)
 
     view.children[0].callback = verificarme_callback
 
