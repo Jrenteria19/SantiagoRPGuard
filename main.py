@@ -1591,6 +1591,9 @@ async def iniciar_cuestionario_verificacion(interaction: discord.Interaction, bo
     ]
     respuestas = []
 
+    # Guardar el guild desde la interacción inicial
+    guild = interaction.guild
+
     # Confirmation step
     confirm_embed = discord.Embed(
         title="🌟 ¡Bienvenido a la Verificación de SantiagoRP! 🌟",
@@ -1605,7 +1608,7 @@ async def iniciar_cuestionario_verificacion(interaction: discord.Interaction, bo
         timestamp=datetime.now()
     )
     confirm_embed.set_footer(text="Santiago RP | Verificación")
-    confirm_embed.set_thumbnail(url=interaction.guild.icon.url if interaction.guild.icon else None)
+    confirm_embed.set_thumbnail(url=guild.icon.url if guild and guild.icon else None)
 
     view = ui.View()
     confirm_button = ui.Button(label="Iniciar Verificación", style=discord.ButtonStyle.primary, emoji="🚀")
@@ -1615,7 +1618,7 @@ async def iniciar_cuestionario_verificacion(interaction: discord.Interaction, bo
             await interaction_btn.response.send_message("❌ Solo el usuario que inició puede confirmar.", ephemeral=True)
             return
         await interaction_btn.response.send_message("✅ ¡Cuestionario iniciado! Revisa tus DMs.", ephemeral=True)
-        await start_questionnaire(interaction_btn)
+        await start_questionnaire(interaction_btn, guild)  # Pasar el guild
     
     confirm_button.callback = confirm_callback
     view.add_item(confirm_button)
@@ -1627,7 +1630,7 @@ async def iniciar_cuestionario_verificacion(interaction: discord.Interaction, bo
         await interaction.response.send_message("🚫 No puedo enviarte mensajes privados. Habilita tus DMs y vuelve a intentarlo.", ephemeral=True)
         return
 
-    async def start_questionnaire(interaction_btn):
+    async def start_questionnaire(interaction_btn, guild):  # Añadir guild como parámetro
         welcome_embed = discord.Embed(
             title="🎉 ¡Cuestionario de Verificación Iniciado! 🎉",
             description=(
@@ -1637,7 +1640,66 @@ async def iniciar_cuestionario_verificacion(interaction: discord.Interaction, bo
             color=Colors.PRIMARY
         )
         welcome_embed.set_footer(text="Santiago RP | Verificación")
+        welcome_embed.set_thumbnail(url=guild.icon.url if guild and guild.icon else None)  # Usar el guild pasado
+
         await interaction_btn.user.send(embed=welcome_embed)
+
+        def check(m):
+            return m.author.id == interaction_btn.user.id and isinstance(m.channel, discord.DMChannel)
+
+        for i, pregunta in enumerate(preguntas, 1):
+            question_embed = discord.Embed(
+                title=f"Pregunta {i}/{len(preguntas)}",
+                description=pregunta,
+                color=Colors.PRIMARY
+            )
+            question_embed.set_footer(text="Tiempo restante: 3 minutos")
+            question_embed.set_thumbnail(url=guild.icon.url if guild and guild.icon else None)
+            await interaction_btn.user.send(embed=question_embed)
+            try:
+                mensaje = await bot.wait_for('message', check=check, timeout=180)
+                respuestas.append(mensaje.content)
+            except asyncio.TimeoutError:
+                timeout_embed = discord.Embed(
+                    title="⏰ ¡Tiempo Agotado!",
+                    description="No respondiste a tiempo. Usa el botón de verificación para intentarlo de nuevo.",
+                    color=Colors.WARNING
+                )
+                await interaction_btn.user.send(embed=timeout_embed)
+                return
+
+        # Create the staff embed with responses
+        embed = discord.Embed(
+            title="📝 Nueva Solicitud de Verificación",
+            description=f"**Usuario:** {interaction_btn.user.mention} ({interaction_btn.user.id})\n"
+                        f"**Nombre en Roblox:** {respuestas[0]}",
+            color=Colors.PRIMARY,
+            timestamp=datetime.now()
+        )
+        for i, pregunta in enumerate(preguntas):
+            embed.add_field(name=pregunta, value=respuestas[i] or "Sin respuesta", inline=False)
+        embed.set_footer(text="Santiago RP | Sistema de Verificación")
+        embed.set_thumbnail(url=guild.icon.url if guild and guild.icon else None)
+        embed.set_author(name="SantiagoRP Verificación", icon_url=guild.icon.url if guild and guild.icon else None)
+
+        # Attach the staff verification view
+        view = VerificacionStaffView(interaction_btn.user, respuestas[0])
+        
+        canal_staff = guild.get_channel(1356740696798924951)
+        if canal_staff:
+            await canal_staff.send(embed=embed, view=view)
+        else:
+            await interaction_btn.user.send("⚠️ Error: No se encontró el canal de staff. Contacta a un administrador.")
+            return
+
+        completion_embed = discord.Embed(
+            title="✅ ¡Solicitud Enviada!",
+            description="Tu solicitud de verificación ha sido enviada al staff. "
+                        "Recibirás una respuesta por DM en **24-48 horas**. ¡Gracias por tu paciencia!",
+            color=Colors.SUCCESS
+        )
+        completion_embed.set_footer(text="Santiago RP | Verificación")
+        await interaction_btn.user.send(embed=completion_embed)
 
         def check(m):
             return m.author.id == interaction_btn.user.id and isinstance(m.channel, discord.DMChannel)
