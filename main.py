@@ -114,7 +114,7 @@ class Channels:
     ANNOUNCEMENTS = 1354927711306645696
     LOGS = 1364100505990729780
     SANCTIONS = 1339386616405561395
-    SANCTION_LOGS = 1364100682990354516
+    SANCTION_LOGS = 1367390263743348848
     VIEW_SANCTIONS = 1344075561689026722
     RATINGS = 1339386616405561398  
     JOB_APPLICATIONS = 1365153550816116797  # Channel where /postular-trabajo is used
@@ -1599,16 +1599,108 @@ def is_ratings_channel():
 # =============================================
 # COMANDOS Y EVENTOS
 # =============================================
+
+@bot.tree.command(name="advertir-a", description="Advertir a un usuario sobre posibles sanciones.")
+@app_commands.describe(
+    usuario="Usuario a advertir",
+    razon="Razón de la advertencia",
+    prueba="URL de la prueba (opcional)"
+)
+async def advertir_a(interaction: discord.Interaction, usuario: discord.Member, razon: str, prueba: str = None):
+    """Comando para advertir a un usuario sobre posibles sanciones."""
+    await interaction.response.defer(ephemeral=True)
+    admin = interaction.user
+
+    advertencia = (
+        f"⚠️ Has sido advertido por el staff.\n\n"
+        f"**Razón:** {razon}\n"
+        f"**Advertencia:** Puedes recibir una sanción de los grados existentes (Advertencia 1, 2, 3), aislamiento o incluso un baneo si reincides o la falta es grave.\n"
+    )
+    if prueba:
+        advertencia += f"**Prueba:** {prueba}\n"
+
+    # Enviar DM al usuario advertido
+    dm_ok = True
+    try:
+        await usuario.send(embed=create_embed(
+            title="Advertencia del Staff",
+            description=advertencia,
+            color=Colors.WARNING,
+            user=usuario
+        ))
+    except Exception as e:
+        dm_ok = False
+
+    # Log en canal específico
+    log_channel_id = 1367389708597858314
+    log_channel = interaction.guild.get_channel(log_channel_id)
+    if log_channel:
+        await log_channel.send(embed=create_embed(
+            title="Usuario Advertido",
+            description=(
+                f"**Usuario:** {usuario.mention} ({usuario.id})\n"
+                f"**Staff:** {admin.mention} ({admin.id})\n"
+                f"**Razón:** {razon}\n"
+                f"{f'**Prueba:** {prueba}' if prueba else ''}\n"
+                f"**DM enviado:** {'Sí' if dm_ok else 'No (no se pudo enviar)'}"
+            ),
+            color=Colors.WARNING,
+            user=admin
+        ))
+
+    # Respuesta al staff
+    await interaction.followup.send(
+        embed=create_embed(
+            title="Usuario Advertido",
+            description=f"El usuario {usuario.mention} ha sido advertido correctamente." if dm_ok else f"No se pudo enviar DM a {usuario.mention}, pero la advertencia fue registrada.",
+            color=Colors.SUCCESS if dm_ok else Colors.DANGER,
+            user=admin
+        ),
+        ephemeral=True
+    )
+
+async def weekly_top_staff_announcement():
+    await bot.wait_until_ready()
+    while not bot.is_closed():
+        now = datetime.now(pytz.timezone("America/Santiago"))
+        # Ejecutar solo el domingo a las 23:59
+        if now.weekday() == 6 and now.hour == 23 and now.minute == 59:
+            top_staff = get_top_staff()
+            channel = bot.get_channel(Channels.RATINGS)  # Cambia por el canal que prefieras
+            if top_staff and channel:
+                staff_id, staff_name, avg_rating, count_rating = top_staff
+                embed = create_embed(
+                    title="🏆 ¡Staff Destacado de la Semana!",
+                    description=(
+                        f"🎉 **{staff_name}** ha sido el staff mejor calificado esta semana con un promedio de **{avg_rating:.2f} estrellas** "
+                        f"en {count_rating} calificaciones.\n\n"
+                        "¡Felicidades y sigue así!\n\n"
+                        "🔄 **Las calificaciones han sido reiniciadas para la próxima semana.**"
+                    ),
+                    color=Colors.SUCCESS
+                )
+                await channel.send(embed=embed)
+            elif channel:
+                await channel.send(embed=create_embed(
+                    title="🏆 Staff Destacado de la Semana",
+                    description="No hubo suficientes calificaciones esta semana para destacar a un staff.\n🔄 **Las calificaciones han sido reiniciadas para la próxima semana.**",
+                    color=Colors.WARNING
+                ))
+            clear_ratings()
+            # Esperar 61 segundos para evitar múltiples ejecuciones en el mismo minuto
+            await asyncio.sleep(61)
+        else:
+            # Revisar cada minuto
+            await asyncio.sleep(60)
+
 @bot.event
 async def on_ready():
     """Evento que se ejecuta cuando el bot está listo."""
     print(f'✨ {bot.user.name} está listo!')
-    
     try:
         # Sincronizar comandos
         synced = await bot.tree.sync()
         print(f"🔁 Comandos sincronizados: {', '.join([cmd.name for cmd in synced])}")
-        
         # Calcular el número de miembros sin bots
         guild = bot.get_guild(1357151555706683473)  # Reemplaza con el ID de tu servidor
         if guild:
@@ -1622,9 +1714,10 @@ async def on_ready():
             print(f"🎮 Actividad establecida: {activity.name}")
         else:
             print("❌ No se encontró el servidor. Verifica el ID del servidor.")
-            
     except Exception as e:
         print(f"❌ Error en on_ready: {e}")
+    # Inicia la tarea de fondo para el staff destacado semanal
+    bot.loop.create_task(weekly_top_staff_announcement())
 
 @bot.tree.command(name="panel", description="Despliega el panel de control administrativo")
 @app_commands.checks.has_any_role(*Roles.STAFF)
@@ -3023,4 +3116,3 @@ async def postular_trabajo(interaction: discord.Interaction, trabajo: str, razon
 # =============================================
 if __name__ == "__main__":
     bot.run(TOKEN)
-
