@@ -2245,6 +2245,18 @@ async def sancionar_a(interaction: discord.Interaction, usuario: discord.Member,
         
         await log_channel.send(embed=log_embed)
 
+def is_view_sanctions_channel():
+    async def predicate(interaction: discord.Interaction) -> bool:
+        if interaction.channel_id != Channels.VIEW_SANCTIONS:
+            await interaction.response.send_message(embed=create_embed(
+                title="❌ Canal Incorrecto",
+                description=f"Este comando solo puede usarse en <#{Channels.VIEW_SANCTIONS}>.",
+                color=Colors.DANGER
+            ), ephemeral=True)
+            return False
+        return True
+    return app_commands.check(predicate)
+
 @bot.tree.command(name="ver-sanciones", description="Muestra las sanciones activas de un usuario")
 @is_view_sanctions_channel()
 @app_commands.describe(
