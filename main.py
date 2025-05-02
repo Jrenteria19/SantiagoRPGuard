@@ -2143,7 +2143,9 @@ async def sancionar_a(interaction: discord.Interaction, usuario: discord.Member,
     sanction_roles = {
         "Advertencia 1": Roles.WARN_1,
         "Advertencia 2": Roles.WARN_2,
-        "Advertencia 3": Roles.WARN_3
+        "Advertencia 3": Roles.WARN_3,
+        "Advertencia 4": Roles.WARN_4,
+        "Advertencia 5": Roles.WARN_5,
     }
     
     if tipo_sancion not in sanction_roles:
@@ -2178,32 +2180,6 @@ async def sancionar_a(interaction: discord.Interaction, usuario: discord.Member,
         ))
         return
 
-    # Verificar cantidad de sanciones para ban automático
-    sanction_count = count_active_sanctions(usuario.id)
-    is_banned = False
-    ban_reason = None
-
-    if sanction_count >= 3:
-        try:
-            ban_reason = f"Acumulación de {sanction_count} sanciones activas"
-            await interaction.guild.ban(
-                usuario,
-                reason=ban_reason,
-                delete_message_days=0
-            )
-            is_banned = True
-            # Programar desbaneo automático después de 7 días
-            await asyncio.sleep(7 * 24 * 60 * 60)  # 7 días en segundos
-            await interaction.guild.unban(usuario, reason="Fin de baneo temporal por acumulación de sanciones")
-        except Exception as e:
-            print(f"Error al banear usuario: {e}")
-            await interaction.followup.send(embed=create_embed(
-                title="❌ Error",
-                description="No se pudo aplicar el baneo automático. Por favor, verifica los permisos del bot.",
-                color=Colors.DANGER
-            ))
-        return
-
     # Crear embed para respuesta en el canal
     sanction_embed = create_embed(
         title="⚖️ Sanción Aplicada",
@@ -2217,8 +2193,6 @@ async def sancionar_a(interaction: discord.Interaction, usuario: discord.Member,
     sanction_embed.add_field(name="⚠️ Tipo de Sanción", value=tipo_sancion, inline=True)
     sanction_embed.add_field(name="📸 Pruebas", value=pruebas, inline=False)
     sanction_embed.add_field(name="👮 Aplicada por", value=interaction.user.mention, inline=True)
-    if is_banned:
-        sanction_embed.add_field(name="🚫 Baneo Temporal", value="7 días por acumulación de sanciones", inline=False)
 
     await interaction.followup.send(embed=sanction_embed)
 
@@ -2235,12 +2209,6 @@ async def sancionar_a(interaction: discord.Interaction, usuario: discord.Member,
         ),
         color=Colors.DANGER
     )
-    if is_banned:
-        dm_embed.add_field(
-            name="🚫 Baneo Temporal",
-            value="Has sido baneado temporalmente por 7 días debido a la acumulación de sanciones.",
-            inline=False
-        )
     dm_embed.add_field(
         name="📜 ¿Cómo apelar?",
         value=(
@@ -2274,22 +2242,8 @@ async def sancionar_a(interaction: discord.Interaction, usuario: discord.Member,
         log_embed.add_field(name="⚠️ Tipo de Sanción", value=tipo_sancion, inline=True)
         log_embed.add_field(name="📸 Pruebas", value=pruebas, inline=False)
         log_embed.add_field(name="👮 Aplicada por", value=interaction.user.mention, inline=True)
-        if is_banned:
-            log_embed.add_field(name="🚫 Baneo Temporal", value="7 días por acumulación de sanciones", inline=False)
         
         await log_channel.send(embed=log_embed)
-
-def is_view_sanctions_channel():
-    async def predicate(interaction: discord.Interaction) -> bool:
-        if interaction.channel_id != Channels.VIEW_SANCTIONS:
-            await interaction.response.send_message(embed=create_embed(
-                title="❌ Canal Incorrecto",
-                description=f"Este comando solo puede usarse en <#{Channels.VIEW_SANCTIONS}>.",
-                color=Colors.DANGER
-            ), ephemeral=True)
-            return False
-        return True
-    return app_commands.check(predicate)
 
 @bot.tree.command(name="ver-sanciones", description="Muestra las sanciones activas de un usuario")
 @is_view_sanctions_channel()
