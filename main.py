@@ -3402,4 +3402,36 @@ async def actualizar_canal_conteo_miembros(guild):
 # INICIAR BOT
 # =============================================
 if __name__ == "__main__":
+    import argparse
+    import os
+    
+    # Configurar argumentos de línea de comandos
+    parser = argparse.ArgumentParser(description='Bot de Discord para Santiago RP')
+    parser.add_argument('--port', type=int, default=int(os.environ.get("PORT", 8080)),
+                        help='Puerto en el que escuchar (por defecto: 8080)')
+    args = parser.parse_args()
+    
+    # Configurar un servidor web simple para mantener el bot activo
+    from http.server import HTTPServer, BaseHTTPRequestHandler
+    
+    class SimpleHandler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header('Content-type', 'text/html')
+            self.end_headers()
+            self.wfile.write(b'Bot de Santiago RP esta funcionando!')
+    
+    def run_server():
+        server_address = ('', args.port)
+        httpd = HTTPServer(server_address, SimpleHandler)
+        print(f'Servidor web iniciado en el puerto {args.port}')
+        httpd.serve_forever()
+    
+    # Iniciar el servidor web en un hilo separado
+    import threading
+    server_thread = threading.Thread(target=run_server)
+    server_thread.daemon = True
+    server_thread.start()
+    
+    # Iniciar el bot
     bot.run(TOKEN)
