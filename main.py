@@ -1905,8 +1905,8 @@ async def advertir_a(interaction: discord.Interaction, usuario: discord.Member, 
             f"**👤 Usuario advertido:** {usuario.mention} ({usuario.id})\n"
             f"**🛡️ Staff:** {admin.mention} ({admin.id})\n"
             f"**📄 Razón:** {razon}\n"
-            f"{f'**📎 Prueba:** {prueba}\n' if prueba else ''}"
-            "\n\n🔔 **Recuerda:** Puedes recibir una sanción de los grados existentes (**Advertencia 1, 2, 3**), aislamiento o incluso un **baneo** si reincides o la falta es grave.\n"
+            + (f"**📎 Prueba:** {prueba}\n" if prueba else "")
+            + "\n🔔 **Recuerda:** Puedes recibir una sanción de los grados existentes (**Advertencia 1, 2, 3**), aislamiento o incluso un **baneo** si reincides o la falta es grave.\n"
             "Por favor, toma en serio esta advertencia y mejora tu comportamiento en el servidor."
         ),
         color=Colors.WARNING,
