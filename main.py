@@ -8,24 +8,28 @@ import uuid
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 import time
+import asyncio
 import pytz
 
 # Cargar variables de entorno
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
 
+# Configuración para SQLite
+DB_PATH = os.getenv('DB_PATH', 'santiago_rp.db')
+
 # Configuración del bot con intenciones
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix='!', intents=intents, help_command=None)
 
 # =============================================
-# BASE DE DATOS (SQLITE)
+# BASE DE DATOS
 # =============================================
 def get_db_connection():
     """Obtener conexión a la base de datos SQLite."""
     try:
-        connection = sqlite3.connect('santiago_rp.db')
-        connection.row_factory = sqlite3.Row  # Para obtener resultados como diccionarios
+        connection = sqlite3.connect(DB_PATH)
+        connection.row_factory = sqlite3.Row
         return connection
     except sqlite3.Error as e:
         print(f"Error al conectar a SQLite: {e}")
@@ -48,7 +52,7 @@ def init_db():
                 proof_url TEXT,
                 admin_id INTEGER,
                 admin_name TEXT,
-                date DATETIME,
+                date TIMESTAMP,
                 active INTEGER
             )
         ''')
@@ -62,7 +66,7 @@ def init_db():
                 comment TEXT,
                 user_id INTEGER,
                 user_name TEXT,
-                date DATETIME
+                date TIMESTAMP
             )
         ''')
         conn.commit()
@@ -104,7 +108,6 @@ class Channels:
     RATINGS = 1339386616405561398  
     JOB_APPLICATIONS = 1365153550816116797  # Channel where /postular-trabajo is used
     JOB_REVIEW = 1365158553412964433  # Channel where staff review applications
-    JOB_LOGS = 1367390263743348848  # Added for job logs (using same as SANCTION_LOGS for simplicity)
 
 class Roles:
     STAFF = [1339386615247798362, 1346545514492985486, 1339386615222767662, 1347803116741066834, 1339386615235346439]
@@ -247,7 +250,6 @@ JOB_ROLES = {
     "pasteleria": {"name": "Pastelería", "role_id": Roles.PASTELERIA},
     "agencia_vehiculos": {"name": "Agencia de Vehículos", "role_id": Roles.AGENCIA_VEHICULOS},
     "tienda_apple": {"name": "Tienda Apple", "role_id": Roles.TIENDA_APPLE},
-    "握
     "tacos": {"name": "Tacos", "role_id": Roles.TACOS},
     "dragones_china": {"name": "Dragones China", "role_id": Roles.DRAGONES_CHINA}
 }
@@ -280,6 +282,7 @@ def save_sanction(user_id: int, username: str, reason: str, sanction_type: str, 
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
+        # Insertar la sanción
         cursor.execute('''
             INSERT INTO sanciones (sanction_id, user_id, username, reason, sanction_type, proof_url, admin_id, admin_name, date, active)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -322,7 +325,8 @@ def get_user_sanctions(user_id: int) -> list:
             ORDER BY date DESC
         ''', (user_id, 1))
         sanctions = cursor.fetchall()
-        result = [(s['sanction_id'], s['reason'], s['sanction_type'], s['proof_url'], s['admin_name'], s['date'].isoformat()) for s in sanctions]
+        # Convertir a formato de tupla para mantener compatibilidad
+        result = [(s['sanction_id'], s['reason'], s['sanction_type'], s['proof_url'], s['admin_name'], s['date']) for s in sanctions]
         return result
     except sqlite3.Error as e:
         print(f"Error al obtener sanciones: {e}")
@@ -337,8 +341,8 @@ def delete_user_sanctions(user_id: int) -> int:
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute('UPDATE sanciones SET active = ? WHERE user_id = ? AND active = ?', (0, user_id, 1))
-        affected_rows = cursor.rowcount
         conn.commit()
+        affected_rows = cursor.rowcount
         return affected_rows
     except sqlite3.Error as e:
         print(f"Error al borrar sanciones: {e}")
@@ -427,6 +431,19 @@ def clear_ratings():
 # =============================================
 # AUTOCOMPLETE
 # =============================================
+async def sanction_type_autocomplete(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
+    """Autocompletar tipos de sanción."""
+    sanction_types = [
+        {"name": "Advertencia 1", "role_id": Roles.WARN_1},
+        {"name": "Advertencia 2", "role_id": Roles.WARN_2},
+        {"name": "Advertencia 3", "role_id": Roles.WARN_3}
+    ]
+    return [
+        app_commands.Choice(name=sanction["name"], value=sanction["name"])
+        for sanction in sanction_types
+        if current.lower() in sanction["name"].lower()
+    ]
+
 async def rating_autocomplete(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
     """Autocompletar calificaciones con estrellas (1 a 5)."""
     ratings = [
@@ -1287,12 +1304,14 @@ async def handle_server_start(interaction: discord.Interaction):
     
     channel = bot.get_channel(Channels.ANNOUNCEMENTS)
     try:
-        await channel.purge(limit=3)
+        await channel.purge(limit=3)  # Reducido de 5 a 3
         message = await channel.send(embed=embed)
         
+        # Enviar dos mensajes de mención con @everyone
         mention1 = await channel.send("@everyone")
         mention2 = await channel.send("@everyone")
         
+        # Programar eliminación de los mensajes de mención después de 30 segundos
         await asyncio.sleep(30)
         await mention1.delete()
         await mention2.delete()
@@ -1340,6 +1359,7 @@ async def handle_server_close(interaction: discord.Interaction):
             color=Colors.DANGER
         ), ephemeral=True)
     
+    # Mostrar modal para la razón del cierre
     modal = CloseServerModal()
     await interaction.response.send_modal(modal)
     
@@ -1350,6 +1370,7 @@ async def handle_server_close(interaction: discord.Interaction):
     server_status = "cerrado"
     reason = modal.reason.value
     
+    # Crear embed moderno y atractivo
     embed = create_embed(
         title="🔒 ¡Santiago RP Cerrado! 😔",
         description=(
@@ -1371,13 +1392,15 @@ async def handle_server_close(interaction: discord.Interaction):
     
     channel = bot.get_channel(Channels.ANNOUNCEMENTS)
     try:
-        await channel.purge(limit=3)
+        await channel.purge(limit=3)  # Reducido de 5 a 3
         message = await channel.send(embed=embed)
-        await message.add_reaction("😔")
+        await message.add_reaction("😔")  # Añadir reacción para interacción
         
+        # Enviar dos mensajes de mención con @everyone
         mention1 = await channel.send("@everyone")
         mention2 = await channel.send("@everyone")
         
+        # Programar eliminación de los mensajes de mención después de 30 segundos
         await asyncio.sleep(30)
         await mention1.delete()
         await mention2.delete()
@@ -1474,14 +1497,16 @@ async def handle_vote_start(interaction: discord.Interaction):
     
     channel = bot.get_channel(Channels.ANNOUNCEMENTS)
     try:
-        await channel.purge(limit=3)
+        await channel.purge(limit=3)  # Reducido de 5 a 3
         message = await channel.send(embed=embed)
         await message.add_reaction("👍")
         await message.add_reaction("👎")
         
+        # Enviar dos mensajes de mención con @everyone
         mention1 = await channel.send("@everyone")
         mention2 = await channel.send("@everyone")
         
+        # Programar eliminación de los mensajes de mención después de 30 segundos
         await asyncio.sleep(30)
         await mention1.delete()
         await mention2.delete()
@@ -1538,6 +1563,7 @@ def is_ratings_channel():
 # FLUJO DE VERIFICACIÓN POR DM
 # =============================
 
+# Start the verification questionnaire
 async def iniciar_cuestionario_verificacion(interaction: discord.Interaction, bot):
     preguntas = [
         "🎮 ¿Cuál es tu nombre de usuario de Roblox?",
@@ -1554,8 +1580,10 @@ async def iniciar_cuestionario_verificacion(interaction: discord.Interaction, bo
     ]
     respuestas = []
 
+    # Guardar el guild desde la interacción inicial
     guild = interaction.guild
 
+    # Confirmation step
     confirm_embed = discord.Embed(
         title="🌟 ¡Bienvenido a la Verificación de SantiagoRP! 🌟",
         description=(
@@ -1579,7 +1607,7 @@ async def iniciar_cuestionario_verificacion(interaction: discord.Interaction, bo
             await interaction_btn.response.send_message("❌ Solo el usuario que inició puede confirmar.", ephemeral=True)
             return
         await interaction_btn.response.send_message("✅ ¡Cuestionario iniciado! Revisa tus DMs.", ephemeral=True)
-        await start_questionnaire(interaction_btn, guild)
+        await start_questionnaire(interaction_btn, guild)  # Pasar el guild
     
     confirm_button.callback = confirm_callback
     view.add_item(confirm_button)
@@ -1591,7 +1619,7 @@ async def iniciar_cuestionario_verificacion(interaction: discord.Interaction, bo
         await interaction.response.send_message("🚫 No puedo enviarte mensajes privados. Habilita tus DMs y vuelve a intentarlo.", ephemeral=True)
         return
 
-    async def start_questionnaire(interaction_btn, guild):
+    async def start_questionnaire(interaction_btn, guild):  # Añadir guild como parámetro
         welcome_embed = discord.Embed(
             title="🎉 ¡Cuestionario de Verificación Iniciado! 🎉",
             description=(
@@ -1601,7 +1629,7 @@ async def iniciar_cuestionario_verificacion(interaction: discord.Interaction, bo
             color=Colors.PRIMARY
         )
         welcome_embed.set_footer(text="Santiago RP | Verificación")
-        welcome_embed.set_thumbnail(url=guild.icon.url if guild and guild.icon else None)
+        welcome_embed.set_thumbnail(url=guild.icon.url if guild and guild.icon else None)  # Usar el guild pasado
 
         await interaction_btn.user.send(embed=welcome_embed)
 
@@ -1629,6 +1657,7 @@ async def iniciar_cuestionario_verificacion(interaction: discord.Interaction, bo
                 await interaction_btn.user.send(embed=timeout_embed)
                 return
 
+        # Create the staff embed with responses
         embed = discord.Embed(
             title="📝 Nueva Solicitud de Verificación",
             description=f"**Usuario:** {interaction_btn.user.mention} ({interaction_btn.user.id})\n"
@@ -1642,6 +1671,7 @@ async def iniciar_cuestionario_verificacion(interaction: discord.Interaction, bo
         embed.set_thumbnail(url=guild.icon.url if guild and guild.icon else None)
         embed.set_author(name="SantiagoRP Verificación", icon_url=guild.icon.url if guild and guild.icon else None)
 
+        # Attach the staff verification view
         view = VerificacionStaffView(interaction_btn.user, respuestas[0])
         
         canal_staff = guild.get_channel(1356740696798924951)
@@ -1660,6 +1690,63 @@ async def iniciar_cuestionario_verificacion(interaction: discord.Interaction, bo
         completion_embed.set_footer(text="Santiago RP | Verificación")
         await interaction_btn.user.send(embed=completion_embed)
 
+        def check(m):
+            return m.author.id == interaction_btn.user.id and isinstance(m.channel, discord.DMChannel)
+
+        for i, pregunta in enumerate(preguntas, 1):
+            question_embed = discord.Embed(
+                title=f"Pregunta {i}/{len(preguntas)}",
+                description=pregunta,
+                color=Colors.PRIMARY
+            )
+            question_embed.set_footer(text="Tiempo restante: 3 minutos")
+            await interaction_btn.user.send(embed=question_embed)
+            try:
+                mensaje = await bot.wait_for('message', check=check, timeout=180)
+                respuestas.append(mensaje.content)
+            except asyncio.TimeoutError:
+                timeout_embed = discord.Embed(
+                    title="⏰ ¡Tiempo Agotado!",
+                    description="No respondiste a tiempo. Usa el botón de verificación para intentarlo de nuevo.",
+                    color=Colors.WARNING
+                )
+                await interaction_btn.user.send(embed=timeout_embed)
+                return
+
+        # Create the staff embed with responses
+        embed = discord.Embed(
+            title="📝 Nueva Solicitud de Verificación",
+            description=f"**Usuario:** {interaction_btn.user.mention} ({interaction_btn.user.id})\n"
+                        f"**Nombre en Roblox:** {respuestas[0]}",
+            color=Colors.PRIMARY,
+            timestamp=datetime.now()
+        )
+        for i, pregunta in enumerate(preguntas):
+            embed.add_field(name=pregunta, value=respuestas[i] or "Sin respuesta", inline=False)
+        embed.set_footer(text="Santiago RP | Sistema de Verificación")
+        embed.set_thumbnail(url=interaction_btn.guild.icon.url if interaction_btn.guild.icon else None)
+        embed.set_author(name="SantiagoRP Verificación", icon_url=interaction_btn.guild.icon.url if interaction_btn.guild.icon else None)
+
+        # Attach the staff verification view
+        view = VerificacionStaffView(interaction_btn.user, respuestas[0])
+        
+        canal_staff = interaction_btn.guild.get_channel(1356740696798924951)
+        if canal_staff:
+            await canal_staff.send(embed=embed, view=view)  # Ensure the view is sent with the embed
+        else:
+            await interaction_btn.user.send("⚠️ Error: No se encontró el canal de staff. Contacta a un administrador.")
+            return
+
+        completion_embed = discord.Embed(
+            title="✅ ¡Solicitud Enviada!",
+            description="Tu solicitud de verificación ha sido enviada al staff. "
+                        "Recibirás una respuesta por DM en **24-48 horas**. ¡Gracias por tu paciencia!",
+            color=Colors.SUCCESS
+        )
+        completion_embed.set_footer(text="Santiago RP | Verificación")
+        await interaction_btn.user.send(embed=completion_embed)
+
+# Staff verification view with Accept/Deny buttons
 class VerificacionStaffView(ui.View):
     def __init__(self, usuario, roblox_name):
         super().__init__(timeout=None)
@@ -1682,6 +1769,7 @@ class VerificacionStaffView(ui.View):
         modal = RazonStaffModal(self.usuario, self.roblox_name, False)
         await interaction.response.send_modal(modal)
 
+# Modal for staff to provide reason
 class RazonStaffModal(ui.Modal, title="Motivo de la Decisión"):
     razon = ui.TextInput(label="Motivo", required=True, style=discord.TextStyle.long)
 
@@ -1699,6 +1787,7 @@ class RazonStaffModal(ui.Modal, title="Motivo de la Decisión"):
             return
 
         if self.aceptar:
+            # Add roles
             roles_a_agregar = [
                 1339386615189209153, 1339386615189209150, 1339386615176630297,
                 1360333071571878231, 1339386615159722121, 1339386615159722120
@@ -1707,13 +1796,16 @@ class RazonStaffModal(ui.Modal, title="Motivo de la Decisión"):
                 rol = interaction.guild.get_role(role_id)
                 if rol:
                     await miembro.add_roles(rol)
+            # Remove unverified role
             rol_noverificado = interaction.guild.get_role(1339386615159722119)
             if rol_noverificado:
                 await miembro.remove_roles(rol_noverificado)
+            # Change nickname
             try:
                 await miembro.edit(nick=f"{miembro.display_name} ({self.roblox_name})")
             except Exception:
                 pass
+            # Send DM
             try:
                 await miembro.send(
                     embed=discord.Embed(
@@ -1727,6 +1819,7 @@ class RazonStaffModal(ui.Modal, title="Motivo de la Decisión"):
                 pass
             await interaction.response.send_message("✅ Usuario verificado y notificado por DM.", ephemeral=True)
         else:
+            # Denied
             try:
                 await self.usuario.send(
                     embed=discord.Embed(
@@ -1740,6 +1833,7 @@ class RazonStaffModal(ui.Modal, title="Motivo de la Decisión"):
                 pass
             await interaction.response.send_message("❌ Usuario notificado de la denegación por DM.", ephemeral=True)
 
+# Command to send verification panel
 @bot.tree.command(name="panel-verificacion", description="Enviar panel de verificación (solo staff).")
 async def panel_verificacion(interaction: discord.Interaction):
     if interaction.channel_id != 1339386615688335395:
@@ -1785,12 +1879,14 @@ async def panel_verificacion(interaction: discord.Interaction):
 )
 async def advertir_a(interaction: discord.Interaction, usuario: discord.Member, razon: str, prueba: str = None):
     """Comando para advertir a un usuario sobre posibles sanciones."""
+    # Verificar canal
     if interaction.channel_id != 1358216083953291467:
         await interaction.response.send_message(
             "❌ Este comando solo puede usarse en el canal autorizado.", ephemeral=True
         )
         return
 
+    # Verificar roles de staff
     staff_roles = set(Roles.STAFF)
     user_roles = set([role.id for role in interaction.user.roles])
     if not staff_roles.intersection(user_roles):
@@ -1802,6 +1898,7 @@ async def advertir_a(interaction: discord.Interaction, usuario: discord.Member, 
     await interaction.response.defer(ephemeral=True)
     admin = interaction.user
 
+    # Crear embed llamativo para el usuario advertido
     advertencia_embed = discord.Embed(
         title="⚠️ ¡Advertencia emitida!",
         description=(
@@ -1824,654 +1921,1485 @@ async def advertir_a(interaction: discord.Interaction, usuario: discord.Member, 
     except Exception as e:
         dm_ok = False
 
+    # Enviar embed público en el canal donde se ejecutó el comando (NO efímero)
     await interaction.channel.send(embed=advertencia_embed)
 
+    # Log en canal específico
     log_channel_id = 1367389708597858314
     log_channel = interaction.guild.get_channel(log_channel_id)
     if log_channel:
         await log_channel.send(embed=create_embed(
             title="Usuario Advertido",
             description=(
-                                f"**Usuario:** {usuario.mention} ({usuario.id})\n"
+                f"**Usuario:** {usuario.mention} ({usuario.id})\n"
                 f"**Staff:** {admin.mention} ({admin.id})\n"
                 f"**Razón:** {razon}\n"
-                f"{f'**Prueba:** {prueba}\n' if prueba else ''}"
-                f"**Notificado por DM:** {'Sí' if dm_ok else 'No'}"
+                f"{f'**Prueba:** {prueba}' if prueba else ''}\n"
+                f"**DM enviado:** {'Sí' if dm_ok else 'No (no se pudo enviar)'}"
             ),
-            color=Colors.WARNING
+            color=Colors.WARNING,
+            user=admin
         ))
 
-    await interaction.followup.send(embed=create_embed(
-        title="✅ Advertencia Enviada",
-        description=f"Se ha advertido a {usuario.mention} correctamente.\n**Notificado por DM:** {'Sí' if dm_ok else 'No'}",
-        color=Colors.SUCCESS
-    ), ephemeral=True)
-
-@bot.tree.command(name="sancionar", description="Sancionar a un usuario (solo staff).")
-@app_commands.describe(
-    usuario="Usuario a sancionar",
-    tipo_sancion="Tipo de sanción (Advertencia 1, 2, 3)",
-    razon="Razón de la sanción",
-    prueba="URL de la prueba (opcional)"
-)
-@app_commands.autocomplete(tipo_sancion=sanction_type_autocomplete)
-async def sancionar(interaction: discord.Interaction, usuario: discord.Member, tipo_sancion: str, razon: str, prueba: str = None):
-    """Comando para sancionar a un usuario."""
-    if not any(role.id in Roles.STAFF for role in interaction.user.roles):
-        await interaction.response.send_message(embed=create_embed(
-            title="❌ Acceso Denegado",
-            description="Solo el staff puede usar este comando.",
-            color=Colors.DANGER
-        ), ephemeral=True)
-        return
-    
-    if interaction.channel_id != Channels.SANCTIONS:
-        await interaction.response.send_message(embed=create_embed(
-            title="❌ Canal Incorrecto",
-            description=f"Este comando solo puede usarse en <#{Channels.SANCTIONS}>.",
-            color=Colors.DANGER
-        ), ephemeral=True)
-        return
-    
-    await interaction.response.defer(ephemeral=True)
-    admin = interaction.user
-    sanction_roles = {
-        "Advertencia 1": Roles.WARN_1,
-        "Advertencia 2": Roles.WARN_2,
-        "Advertencia 3": Roles.WARN_3
-    }
-    
-    role_id = sanction_roles.get(tipo_sancion)
-    if not role_id:
-        await interaction.followup.send(embed=create_embed(
-            title="❌ Tipo de Sanción Inválido",
-            description="Por favor, selecciona un tipo de sanción válido.",
-            color=Colors.DANGER
-        ), ephemeral=True)
-        return
-    
-    try:
-        sanction_id = save_sanction(
-            user_id=usuario.id,
-            username=usuario.display_name,
-            reason=razon,
-            sanction_type=tipo_sancion,
-            proof_url=prueba,
-            admin_id=admin.id,
-            admin_name=admin.display_name
-        )
-        
-        role = interaction.guild.get_role(role_id)
-        if role:
-            await usuario.add_roles(role)
-        
-        active_sanctions = count_active_sanctions(usuario.id)
-        sanction_embed = create_embed(
-            title="🚨 Nueva Sanción",
-            description=(
-                f"**Usuario:** {usuario.mention} ({usuario.id})\n"
-                f"**Tipo de Sanción:** {tipo_sancion}\n"
-                f"**Razón:** {razon}\n"
-                f"{f'**Prueba:** {prueba}\n' if prueba else ''}"
-                f"**Administrador:** {admin.mention}\n"
-                f"**ID de Sanción:** `{sanction_id}`\n"
-                f"**Sanciones Activas:** {active_sanctions}"
-            ),
-            color=Colors.DANGER,
-            user=usuario
-        )
-        
-        channel = bot.get_channel(Channels.SANCTION_LOGS)
-        if channel:
-            await channel.send(embed=sanction_embed)
-        
-        view_channel = bot.get_channel(Channels.VIEW_SANCTIONS)
-        if view_channel:
-            await view_channel.send(embed=sanction_embed)
-        
-        dm_sent = True
-        try:
-            await usuario.send(embed=create_embed(
-                title="🚨 Has Recibido una Sanción",
-                description=(
-                    f"**Tipo de Sanción:** {tipo_sancion}\n"
-                    f"**Razón:** {razon}\n"
-                    f"{f'**Prueba:** {prueba}\n' if prueba else ''}"
-                    f"**Administrador:** {admin.display_name}\n"
-                    f"**Sanciones Activas:** {active_sanctions}\n\n"
-                    "Si crees que esto es un error, apela en el canal correspondiente."
-                ),
-                color=Colors.DANGER
-            ))
-        except:
-            dm_sent = False
-        
-        await interaction.followup.send(embed=create_embed(
-            title="✅ Sanción Aplicada",
-            description=f"Se ha sancionado a {usuario.mention} con {tipo_sancion}.\n**Notificado por DM:** {'Sí' if dm_sent else 'No'}",
-            color=Colors.SUCCESS
-        ), ephemeral=True)
-        
-    except Exception as e:
-        print(f"Error al sancionar: {e}")
-        await interaction.followup.send(embed=create_embed(
-            title="❌ Error",
-            description="No se pudo aplicar la sanción. Por favor, intenta de nuevo.",
-            color=Colors.DANGER
-        ), ephemeral=True)
-
-@bot.tree.command(name="revisar-sanciones", description="Revisar sanciones activas de un usuario.")
-@app_commands.describe(usuario="Usuario cuyas sanciones deseas revisar")
-async def revisar_sanciones(interaction: discord.Interaction, usuario: discord.Member):
-    """Comando para revisar sanciones activas de un usuario."""
-    try:
-        sanctions = get_user_sanctions(usuario.id)
-        if not sanctions:
-            await interaction.response.send_message(embed=create_embed(
-                title="✅ Sin Sanciones",
-                description=f"{usuario.mention} no tiene sanciones activas.",
-                color=Colors.SUCCESS
-            ), ephemeral=True)
-            return
-        
-        embed = create_embed(
-            title=f"📜 Sanciones de {usuario.display_name}",
-            description=f"**Usuario:** {usuario.mention}\n**Sanciones Activas:** {len(sanctions)}",
-            color=Colors.WARNING
-        )
-        
-        for sanction in sanctions[:25]:  # Discord embed field limit
-            sanction_id, reason, sanction_type, proof_url, admin_name, date = sanction
-            embed.add_field(
-                name=f"Sanción: {sanction_type} ({sanction_id[:8]})",
-                value=(
-                    f"**Razón:** {reason}\n"
-                    f"**Fecha:** {date}\n"
-                    f"**Administrador:** {admin_name}\n"
-                    f"{f'**Prueba:** {proof_url}' if proof_url else ''}"
-                ),
-                inline=False
-            )
-        
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-        
-    except Exception as e:
-        print(f"Error al revisar sanciones: {e}")
-        await interaction.response.send_message(embed=create_embed(
-            title="❌ Error",
-            description="No se pudieron revisar las sanciones. Intenta de nuevo.",
-            color=Colors.DANGER
-        ), ephemeral=True)
-
-@bot.tree.command(name="borrar-sanciones", description="Borrar todas las sanciones activas de un usuario (solo staff).")
-@app_commands.describe(usuario="Usuario cuyas sanciones deseas borrar")
-async def borrar_sanciones(interaction: discord.Interaction, usuario: discord.Member):
-    """Comando para borrar sanciones activas de un usuario."""
-    if not any(role.id in Roles.STAFF for role in interaction.user.roles):
-        await interaction.response.send_message(embed=create_embed(
-            title="❌ Acceso Denegado",
-            description="Solo el staff puede usar este comando.",
-            color=Colors.DANGER
-        ), ephemeral=True)
-        return
-    
-    try:
-        affected_rows = delete_user_sanctions(usuario.id)
-        
-        for role_id in [Roles.WARN_1, Roles.WARN_2, Roles.WARN_3, Roles.WARN_4, Roles.WARN_5]:
-            role = interaction.guild.get_role(role_id)
-            if role and role in usuario.roles:
-                await usuario.remove_roles(role)
-        
-        log_channel = bot.get_channel(Channels.SANCTION_LOGS)
-        if log_channel:
-            await log_channel.send(embed=create_embed(
-                title="🗑️ Sanciones Borradas",
-                description=(
-                    f"**Usuario:** {usuario.mention} ({usuario.id})\n"
-                    f"**Sanciones Eliminadas:** {affected_rows}\n"
-                    f"**Administrador:** {interaction.user.mention}"
-                ),
-                color=Colors.INFO
-            ))
-        
-        await interaction.response.send_message(embed=create_embed(
-            title="✅ Sanciones Borradas",
-            description=f"Se han eliminado {affected_rows} sanciones activas de {usuario.mention}.",
-            color=Colors.SUCCESS
-        ), ephemeral=True)
-        
-    except Exception as e:
-        print(f"Error al borrar sanciones: {e}")
-        await interaction.response.send_message(embed=create_embed(
-            title="❌ Error",
-            description="No se pudieron borrar las sanciones. Intenta de nuevo.",
-            color=Colors.DANGER
-        ), ephemeral=True)
-
-@bot.tree.command(name="calificar", description="Calificar a un miembro del staff.")
-@app_commands.describe(
-    staff="Miembro del staff a calificar",
-    calificacion="Calificación (1 a 5 estrellas)",
-    comentario="Comentario sobre la calificación"
-)
-@app_commands.autocomplete(calificacion=rating_autocomplete)
-@is_ratings_channel()
-async def calificar(interaction: discord.Interaction, staff: discord.Member, calificacion: str, comentario: str):
-    """Comando para calificar a un miembro del staff."""
-    if not any(role.id in Roles.STAFF for role in staff.roles):
-        await interaction.response.send_message(embed=create_embed(
-            title="❌ Usuario Inválido",
-            description="Solo puedes calificar a miembros del staff.",
-            color=Colors.DANGER
-        ), ephemeral=True)
-        return
-    
-    try:
-        rating = int(calificacion)
-        if rating < 1 or rating > 5:
-            await interaction.response.send_message(embed=create_embed(
-                title="❌ Calificación Inválida",
-                description="La calificación debe ser entre 1 y 5 estrellas.",
-                color=Colors.DANGER
-            ), ephemeral=True)
-            return
-        
-        rating_id = save_rating(
-            staff_id=staff.id,
-            staff_name=staff.display_name,
-            rating=rating,
-            comment=comentario,
-            user_id=interaction.user.id,
-            user_name=interaction.user.display_name
-        )
-        
-        embed = create_embed(
-            title="🌟 Nueva Calificación",
-            description=(
-                f"**Staff:** {staff.mention} ({staff.id})\n"
-                f"**Calificación:** {'🌟' * rating}\n"
-                f"**Comentario:** {comentario}\n"
-                f"**Usuario:** {interaction.user.mention}\n"
-                f"**ID de Calificación:** `{rating_id}`"
-            ),
-            color=Colors.SUCCESS,
-            user=staff
-        )
-        
-        await interaction.response.send_message(embed=embed)
-        
-        log_channel = bot.get_channel(Channels.RATINGS)
-        if log_channel:
-            await log_channel.send(embed=embed)
-        
-    except ValueError:
-        await interaction.response.send_message(embed=create_embed(
-            title="❌ Calificación Inválida",
-            description="Por favor, selecciona una calificación válida (1 a 5).",
-            color=Colors.DANGER
-        ), ephemeral=True)
-    except Exception as e:
-        print(f"Error al guardar calificación: {e}")
-        await interaction.response.send_message(embed=create_embed(
-            title="❌ Error",
-            description="No se pudo guardar la calificación. Intenta de nuevo.",
-            color=Colors.DANGER
-        ), ephemeral=True)
-
-@bot.tree.command(name="mejor-staff", description="Ver el staff con la mejor calificación promedio.")
-async def mejor_staff(interaction: discord.Interaction):
-    """Comando para ver el staff con mejor promedio de calificación."""
-    try:
-        top_staff = get_top_staff()
-        if not top_staff:
-            await interaction.response.send_message(embed=create_embed(
-                title="📊 Sin Resultados",
-                description="No hay staff con suficientes calificaciones (mínimo 3).",
-                color=Colors.INFO
-            ), ephemeral=True)
-            return
-        
-        staff_id, staff_name, avg_rating, count_rating = top_staff
-        embed = create_embed(
-            title="🏆 Mejor Staff",
-            description=(
-                f"**Staff:** {staff_name} (<@{staff_id}>)\n"
-                f"**Promedio:** {avg_rating:.2f}/5\n"
-                f"**Calificaciones:** {count_rating}"
-            ),
-            color=Colors.SUCCESS
-        )
-        
-        await interaction.response.send_message(embed=embed)
-        
-    except Exception as e:
-        print(f"Error al obtener mejor staff: {e}")
-        await interaction.response.send_message(embed=create_embed(
-            title="❌ Error",
-            description="No se pudo obtener el mejor staff. Intenta de nuevo.",
-            color=Colors.DANGER
-        ), ephemeral=True)
-
-@bot.tree.command(name="limpiar-calificaciones", description="Borrar todas las calificaciones (solo staff).")
-async def limpiar_calificaciones(interaction: discord.Interaction):
-    """Comando para borrar todas las calificaciones."""
-    if not any(role.id in Roles.STAFF for role in interaction.user.roles):
-        await interaction.response.send_message(embed=create_embed(
-            title="❌ Acceso Denegado",
-            description="Solo el staff puede usar este comando.",
-            color=Colors.DANGER
-        ), ephemeral=True)
-        return
-    
-    try:
-        clear_ratings()
-        await interaction.response.send_message(embed=create_embed(
-            title="🗑️ Calificaciones Borradas",
-            description="Se han eliminado todas las calificaciones.",
-            color=Colors.SUCCESS
-        ), ephemeral=True)
-        
-        log_channel = bot.get_channel(Channels.LOGS)
-        if log_channel:
-            await log_channel.send(embed=create_embed(
-                title="🗑️ Calificaciones Borradas",
-                description=f"**Administrador:** {interaction.user.mention}",
-                color=Colors.INFO
-            ))
-        
-    except Exception as e:
-        print(f"Error al borrar calificaciones: {e}")
-        await interaction.response.send_message(embed=create_embed(
-            title="❌ Error",
-            description="No se pudieron borrar las calificaciones. Intenta de nuevo.",
-            color=Colors.DANGER
-        ), ephemeral=True)
-
-@bot.tree.command(name="postular-trabajo", description="Solicitar un trabajo en el servidor.")
-@app_commands.describe(
-    roblox_username="Tu nombre de usuario en Roblox",
-    trabajo="El trabajo al que deseas postular",
-    experiencia="Tu experiencia previa en el rol o trabajos similares",
-    disponibilidad="Tu disponibilidad horaria (en UTC)",
-    razon="Por qué quieres este trabajo"
-)
-async def postular_trabajo(interaction: discord.Interaction, roblox_username: str, trabajo: str, experiencia: str, disponibilidad: str, razon: str):
-    """Comando para postular a un trabajo en el servidor."""
-    if interaction.channel_id != Channels.JOB_APPLICATIONS:
-        await interaction.response.send_message(embed=create_embed(
-            title="❌ Canal Incorrecto",
-            description=f"Este comando solo puede usarse en <#{Channels.JOB_APPLICATIONS}>.",
-            color=Colors.DANGER
-        ), ephemeral=True)
-        return
-    
-    await interaction.response.defer(ephemeral=True)
-    
-    job_options = {job["name"].lower(): job for job in JOB_ROLES.values()}
-    selected_job = None
-    for job_name, job_data in job_options.items():
-        if trabajo.lower() in job_name.lower():
-            selected_job = job_data
-            break
-    
-    if not selected_job:
-        await interaction.followup.send(embed=create_embed(
-            title="❌ Trabajo Inválido",
-            description="El trabajo especificado no es válido. Usa el autocompletado para seleccionar un trabajo.",
-            color=Colors.DANGER
-        ), ephemeral=True)
-        return
-    
-    try:
-        embed = create_embed(
-            title="💼 Nueva Postulación de Trabajo",
-            description=(
-                f"**Usuario:** {interaction.user.mention} ({interaction.user.id})\n"
-                f"**Nombre en Roblox:** {roblox_username}\n"
-                f"**Trabajo:** {selected_job['name']}\n"
-                f"**Experiencia:** {experiencia}\n"
-                f"**Disponibilidad:** {disponibilidad}\n"
-                f"**Razón:** {razon}"
-            ),
-            color=Colors.INFO,
-            user=interaction.user
-        )
-        
-        review_channel = bot.get_channel(Channels.JOB_REVIEW)
-        if not review_channel:
-            await interaction.followup.send(embed=create_embed(
-                title="❌ Error",
-                description="No se encontró el canal de revisión de postulaciones.",
-                color=Colors.DANGER
-            ), ephemeral=True)
-            return
-        
-        view = JobApplicationView(interaction.user, roblox_username, selected_job)
-        await review_channel.send(embed=embed, view=view)
-        
-        await interaction.followup.send(embed=create_embed(
-            title="✅ Postulación Enviada",
-            description="Tu postulación ha sido enviada al staff para revisión. Recibirás una respuesta pronto.",
-            color=Colors.SUCCESS
-        ), ephemeral=True)
-        
-    except Exception as e:
-        print(f"Error al enviar postulación: {e}")
-        await interaction.followup.send(embed=create_embed(
-            title="❌ Error",
-            description="No se pudo enviar la postulación. Intenta de nuevo.",
-            color=Colors.DANGER
-        ), ephemeral=True)
-
-# Vista para manejar aceptación/rechazo de postulaciones
-class JobApplicationView(ui.View):
-    def __init__(self, user: discord.Member, roblox_username: str, job: dict):
-        super().__init__(timeout=None)
-        self.user = user
-        self.roblox_username = roblox_username
-        self.job = job
-    
-    @ui.button(label="Aceptar", style=discord.ButtonStyle.success, emoji="✅")
-    async def accept_button(self, interaction: discord.Interaction, button: ui.Button):
-        if not any(role.id in Roles.STAFF for role in interaction.user.roles):
-            await interaction.response.send_message(embed=create_embed(
-                title="❌ Acceso Denegado",
-                description="Solo el staff puede usar este botón.",
-                color=Colors.DANGER
-            ), ephemeral=True)
-            return
-        
-        try:
-            member = await interaction.guild.fetch_member(self.user.id)
-            role = interaction.guild.get_role(self.job["role_id"])
-            salary_role = interaction.guild.get_role(Roles.SUELDO)
-            if role and member:
-                await member.add_roles(role)
-            if salary_role and member:
-                await member.add_roles(salary_role)
-            
-            await member.edit(nick=f"{self.roblox_username} | {self.job['name']}")
-            
-            dm_sent = True
-            try:
-                await member.send(embed=create_embed(
-                    title="✅ Postulación Aceptada",
-                    description=f"¡Felicidades! Has sido aceptado para el trabajo de **{self.job['name']}**.",
-                    color=Colors.SUCCESS
-                ))
-            except:
-                dm_sent = False
-            
-            log_channel = bot.get_channel(Channels.JOB_LOGS)
-            if log_channel:
-                await log_channel.send(embed=create_embed(
-                    title="💼 Postulación Aceptada",
-                    description=(
-                        f"**Usuario:** {member.mention} ({member.id})\n"
-                        f"**Trabajo:** {self.job['name']}\n"
-                        f"**Aprobado por:** {interaction.user.mention}\n"
-                        f"**Notificado por DM:** {'Sí' if dm_sent else 'No'}"
-                    ),
-                    color=Colors.SUCCESS
-                ))
-            
-            await interaction.response.send_message(embed=create_embed(
-                title="✅ Postulación Aceptada",
-                description=f"Se ha aceptado la postulación de {member.mention} para **{self.job['name']}**.",
-                color=Colors.SUCCESS
-            ), ephemeral=True)
-            
-            for child in self.children:
-                child.disabled = True
-            await interaction.message.edit(view=self)
-            
-        except Exception as e:
-            print(f"Error al aceptar postulación: {e}")
-            await interaction.response.send_message(embed=create_embed(
-                title="❌ Error",
-                description="No se pudo aceptar la postulación. Intenta de nuevo.",
-                color=Colors.DANGER
-            ), ephemeral=True)
-    
-    @ui.button(label="Rechazar", style=discord.ButtonStyle.danger, emoji="❌")
-    async def reject_button(self, interaction: discord.Interaction, button: ui.Button):
-        if not any(role.id in Roles.STAFF for role in interaction.user.roles):
-            await interaction.response.send_message(embed=create_embed(
-                title="❌ Acceso Denegado",
-                description="Solo el staff puede usar este botón.",
-                color=Colors.DANGER
-            ), ephemeral=True)
-            return
-        
-        modal = JobRejectionModal(self.user, self.job)
-        await interaction.response.send_modal(modal)
-
-# Modal para rechazar postulaciones
-class JobRejectionModal(ui.Modal, title="Rechazar Postulación"):
-    reason = ui.TextInput(
-        label="Razón del Rechazo",
-        placeholder="Explica por qué se rechaza la postulación...",
-        style=discord.TextStyle.long,
-        required=True
+    # Respuesta al staff (efímera)
+    await interaction.followup.send(
+        embed=create_embed(
+            title="Usuario Advertido",
+            description=f"El usuario {usuario.mention} ha sido advertido correctamente." if dm_ok else f"No se pudo enviar DM a {usuario.mention}, pero la advertencia fue registrada.",
+            color=Colors.SUCCESS if dm_ok else Colors.DANGER,
+            user=admin
+        ),
+        ephemeral=True
     )
-    
-    def __init__(self, user: discord.Member, job: dict):
-        super().__init__()
-        self.user = user
-        self.job = job
-    
-    async def on_submit(self, interaction: discord.Interaction):
-        try:
-            member = await interaction.guild.fetch_member(self.user.id)
-            
-            dm_sent = True
-            try:
-                await member.send(embed=create_embed(
-                    title="❌ Postulación Rechazada",
-                    description=(
-                        f"Tu postulación para el trabajo de **{self.job['name']}** ha sido rechazada.\n"
-                        f"**Razón:** {self.reason.value}"
-                    ),
-                    color=Colors.DANGER
-                ))
-            except:
-                dm_sent = False
-            
-            log_channel = bot.get_channel(Channels.JOB_LOGS)
-            if log_channel:
-                await log_channel.send(embed=create_embed(
-                    title="❌ Postulación Rechazada",
-                    description=(
-                        f"**Usuario:** {member.mention} ({member.id})\n"
-                        f"**Trabajo:** {self.job['name']}\n"
-                        f"**Razón:** {self.reason.value}\n"
-                        f"**Rechazado por:** {interaction.user.mention}\n"
-                        f"**Notificado por DM:** {'Sí' if dm_sent else 'No'}"
-                    ),
-                    color=Colors.DANGER
-                ))
-            
-            await interaction.response.send_message(embed=create_embed(
-                title="❌ Postulación Rechazada",
-                description=f"Se ha rechazado la postulación de {member.mention} para **{self.job['name']}**.",
-                color=Colors.DANGER
-            ), ephemeral=True)
-            
-            view = interaction.message.components[0]
-            for child in view.children:
-                child.disabled = True
-            await interaction.message.edit(view=view)
-            
-        except Exception as e:
-            print(f"Error al rechazar postulación: {e}")
-            await interaction.response.send_message(embed=create_embed(
-                title="❌ Error",
-                description="No se pudo rechazar la postulación. Intenta de nuevo.",
-                color=Colors.DANGER
-            ), ephemeral=True)
 
-# Autocompletado para trabajos
-async def job_autocomplete(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
-    """Autocompletar trabajos disponibles."""
-    return [
-        app_commands.Choice(name=job["name"], value=job["name"])
-        for job in JOB_ROLES.values()
-        if current.lower() in job["name"].lower()
-    ]
-
-# Registrar autocompletado para postular-trabajo
-bot.tree.command(name="postular-trabajo")._params["trabajo"].autocomplete = job_autocomplete
+async def weekly_top_staff_announcement():
+    await bot.wait_until_ready()
+    while not bot.is_closed():
+        now = datetime.now(pytz.timezone("America/Santiago"))
+        # Ejecutar solo el domingo a las 23:59
+        if now.weekday() == 6 and now.hour == 23 and now.minute == 59:
+            top_staff = get_top_staff()
+            channel = bot.get_channel(Channels.RATINGS)  # Cambia por el canal que prefieras
+            if top_staff and channel:
+                staff_id, staff_name, avg_rating, count_rating = top_staff
+                embed = create_embed(
+                    title="🏆 ¡Staff Destacado de la Semana!",
+                    description=(
+                        f"🎉 **{staff_name}** ha sido el staff mejor calificado esta semana con un promedio de **{avg_rating:.2f} estrellas** "
+                        f"en {count_rating} calificaciones.\n\n"
+                        "¡Felicidades y sigue así!\n\n"
+                        "🔄 **Las calificaciones han sido reiniciadas para la próxima semana.**"
+                    ),
+                    color=Colors.SUCCESS
+                )
+                await channel.send(embed=embed)
+            elif channel:
+                await channel.send(embed=create_embed(
+                    title="🏆 Staff Destacado de la Semana",
+                    description="No hubo suficientes calificaciones esta semana para destacar a un staff.\n🔄 **Las calificaciones han sido reiniciadas para la próxima semana.**",
+                    color=Colors.WARNING
+                ))
+            clear_ratings()
+            # Esperar 61 segundos para evitar múltiples ejecuciones en el mismo minuto
+            await asyncio.sleep(61)
+        else:
+            # Revisar cada minuto
+            await asyncio.sleep(60)
 
 @bot.event
 async def on_ready():
-    """Evento que se ejecuta cuando el bot está listo."""
-    print(f"✅ Bot conectado como {bot.user.name}")
+    print(f'✨ {bot.user.name} está listo!')
     try:
+        # Sincronizar comandos
         synced = await bot.tree.sync()
-        print(f"Comandos sincronizados: {len(synced)}")
+        print(f"🔁 Comandos sincronizados: {', '.join([cmd.name for cmd in synced])}")
+        # Calcular el número de miembros sin bots
+        guild = bot.get_guild(1339386615147266108)  # Reemplaza con el ID de tu servidor
+        if guild:
+            member_count = sum(1 for member in guild.members if not member.bot)
+            # Establecer actividad personalizada
+            activity = discord.Activity(
+                type=discord.ActivityType.playing,
+                name=f"🌟 Creado por Smile | SantiagoRP | 👥 {member_count} Miembros"
+            )
+            await bot.change_presence(activity=activity)
+            print(f"🎮 Actividad establecida: {activity.name}")
+        else:
+            print("❌ No se encontró el servidor. Verifica el ID del servidor.")
+        # Actualizar canal de conteo de miembros al iniciar
+        for guild in bot.guilds:
+            await actualizar_canal_conteo_miembros(guild)
     except Exception as e:
-        print(f"Error al sincronizar comandos: {e}")
-    
-    # Enviar panel de control
-    channel = bot.get_channel(Channels.CONTROL_PANEL)
-    if channel:
-        embed = create_embed(
-            title="🛠️ Panel de Control Administrativo",
-            description="Utiliza los botones a continuación para gestionar el servidor.",
-            color=Colors.PRIMARY
-        )
-        view = ControlPanelView()
-        try:
-            await channel.purge(limit=10)
-            await channel.send(embed=embed, view=view)
-        except Exception as e:
-            print(f"Error al enviar panel de control: {e}")
-    
-    # Enviar panel de tickets
-    ticket_channel = bot.get_channel(Channels.TICKETS)
-    if ticket_channel:
-        embed = create_embed(
-            title="🎟️ Sistema de Tickets",
-            description=(
-                "🌟 **¡Bienvenido al Sistema de Tickets de Santiago RP!** 🌟\n\n"
-                "Utiliza el menú desplegable para seleccionar el tipo de ticket que necesitas.\n"
-                "🚨 **Advertencia:** Abrir tickets sin motivo válido resultará en **sanciones**.\n\n"
-                "📌 **Pasos:**\n"
-                "1. Selecciona una categoría.\n"
-                "2. Completa el formulario con información clara.\n"
-                "3. Espera la respuesta de nuestro equipo.\n\n"
-                "¡Gracias por ser parte de nuestra comunidad! 🙌"
-            ),
-            color=Colors.PRIMARY
-        )
-        view = TicketCreationView()
-        try:
-            await ticket_channel.purge(limit=10)
-            await ticket_channel.send(embed=embed, view=view)
-        except Exception as e:
-            print(f"Error al enviar panel de tickets: {e}")
+        print(f"❌ Error en on_ready: {e}")
+    # Inicia la tarea de fondo para el staff destacado semanal
+    bot.loop.create_task(weekly_top_staff_announcement())
 
-# Iniciar el bot
+@bot.tree.command(name="panel", description="Despliega el panel de control administrativo")
+@app_commands.checks.has_any_role(*Roles.STAFF)
+async def control_panel(interaction: discord.Interaction):
+    """Comando para mostrar el panel de control."""
+    embed = create_embed(
+        title="⚙️ Panel de Control Santiago RP",
+        description="Gestiona el servidor con las siguientes opciones:",
+        color=Colors.PRIMARY,
+        user=interaction.user
+    )
+    embed.add_field(name="🚀 Abrir Servidor", value="Abre el servidor para todos los jugadores.", inline=True)
+    embed.add_field(name="🗳️ Iniciar Votación", value="Inicia una votación para abrir el servidor.", inline=True)
+    embed.add_field(name="🔒 Cerrar Servidor", value="Cierra el servidor y notifica a los jugadores.", inline=True)
+    
+    await interaction.response.send_message(embed=embed, view=ControlPanelView())
+
+def is_tickets_channel():
+    async def predicate(interaction: discord.Interaction) -> bool:
+        if interaction.channel_id != Channels.TICKETS:
+            await interaction.response.send_message(embed=create_embed(
+                title="❌ Canal Incorrecto",
+                description=f"Este comando solo puede usarse en <#{Channels.TICKETS}>.",
+                color=Colors.DANGER
+            ), ephemeral=True)
+            return False
+        return True
+    return app_commands.check(predicate)
+
+@bot.tree.command(name="tickets", description="Abre el sistema de tickets interactivo")
+@is_tickets_channel()
+async def setup_tickets(interaction: discord.Interaction):
+    """Comando para configurar el sistema de tickets."""
+    embed = create_embed(
+        title="🎫 Sistema de Tickets Santiago RP",
+        description=(
+            "¡Bienvenido al sistema de tickets de **Santiago RP**! 🎉\n"
+            "Selecciona la categoría que mejor se ajuste a tu necesidad usando el menú desplegable.\n\n"
+            "**⚠️ IMPORTANTE:**\n"
+            "- Asegúrate de abrir tickets con un motivo válido.\n"
+            "- Los tickets sin justificación pueden resultar en **sanciones**.\n"
+            "- Lee las reglas del servidor antes de crear un ticket."
+        ),
+        color=Colors.INFO,
+        user=interaction.user
+    )
+    
+    embed.add_field(
+        name="🧩 Asistencia General",
+        value=(
+            "🔹 **Ayuda General**: Resuelve dudas o problemas generales.\n"
+            "🔹 **Dudas**: Consulta sobre reglas o mecánicas del servidor."
+        ),
+        inline=False
+    )
+    embed.add_field(
+        name="🏛️ Trámites Oficiales",
+        value=(
+            "🔹 **Municipalidad**: Licencias, propiedades, registros.\n"
+            "🔹 **Creación Empresa**: Solicita crear una empresa legal.\n"
+            "🔹 **Facción Ilegal**: Registro de facciones ilegales."
+        ),
+        inline=False
+    )
+    embed.add_field(
+        name="⚠️ Reportes y Reclamos",
+        value=(
+            "🔹 **Compras**: Problemas con paquetes VIP o compras.\n"
+            "🔹 **Beneficios**: Reclamos de beneficios especiales.\n"
+            "🔹 **Reportes**: Denuncia jugadores o bugs.\n"
+            "🔹 **Reclamo Robo**: Reporta pérdidas por robos.\n"
+            "🔹 **Apelaciones**: Apela sanciones o baneos."
+        ),
+        inline=False
+    )
+    embed.add_field(
+        name="🤝 Otros Servicios",
+        value=(
+            "🔹 **Alianzas**: Solicita alianzas entre facciones.\n"
+            "🔹 **Solicitud CK**: Pide un Character Kill (muerte permanente)."
+        ),
+        inline=False
+    )
+    
+    embed.set_thumbnail(url=interaction.guild.icon.url if interaction.guild.icon else "")
+    embed.set_footer(text="Santiago RP | Sistema Automatizado | Creado por Smile")
+    
+    await interaction.response.send_message(embed=embed, view=TicketCreationView())
+
+def is_sanctions_channel():
+    async def predicate(interaction: discord.Interaction) -> bool:
+        if interaction.channel_id != Channels.SANCTIONS:
+            await interaction.response.send_message(embed=create_embed(
+                title="❌ Canal Incorrecto",
+                description=f"Este comando solo puede usarse en <#{Channels.SANCTIONS}>.",
+                color=Colors.DANGER
+            ), ephemeral=True)
+            return False
+        return True
+    return app_commands.check(predicate)
+
+@bot.tree.command(name="sancionar-a", description="Aplica una sanción a un usuario")
+@app_commands.checks.has_any_role(*Roles.STAFF)
+@is_sanctions_channel()
+@app_commands.autocomplete(tipo_sancion=sanction_type_autocomplete)
+@app_commands.describe(
+    usuario="Selecciona el usuario a sancionar",
+    motivo="Explica por qué se sanciona al usuario",
+    tipo_sancion="Elige el tipo de sanción (Advertencia 1, 2 o 3)",
+    pruebas="Enlace a las pruebas de la sanción (ej. https://imgur.com/abc)"
+)
+async def sancionar_a(interaction: discord.Interaction, usuario: discord.Member, motivo: str, tipo_sancion: str, pruebas: str):
+    """Comando para sancionar a un usuario."""
+    await interaction.response.defer()
+
+    # Validar tipo de sanción
+    sanction_roles = {
+        "Advertencia 1": Roles.WARN_1,
+        "Advertencia 2": Roles.WARN_2,
+        "Advertencia 3": Roles.WARN_3,
+        "Advertencia 4": Roles.WARN_4,
+        "Advertencia 5": Roles.WARN_5,
+    }
+    
+    if tipo_sancion not in sanction_roles:
+        return await interaction.followup.send(embed=create_embed(
+            title="❌ Tipo de Sanción Inválido",
+            description="Por favor, selecciona un tipo de sanción válido (Advertencia 1, Advertencia 2, Advertencia 3).",
+            color=Colors.DANGER
+        ))
+
+    # Guardar sanción en la base de datos
+    sanction_id = save_sanction(
+        user_id=usuario.id,
+        username=usuario.name,
+        reason=motivo,
+        sanction_type=tipo_sancion,
+        proof_url=pruebas,
+        admin_id=interaction.user.id,
+        admin_name=interaction.user.name
+    )
+
+    # Asignar rol correspondiente
+    role_id = sanction_roles[tipo_sancion]
+    role = interaction.guild.get_role(role_id)
+    try:
+        await usuario.add_roles(role, reason=f"Sanción {tipo_sancion} aplicada por {interaction.user.name}")
+    except Exception as e:
+        print(f"Error al asignar rol: {e}")
+        await interaction.followup.send(embed=create_embed(
+            title="❌ Error",
+            description="No se pudo asignar el rol de sanción. Por favor, verifica los permisos del bot.",
+            color=Colors.DANGER
+        ))
+        return
+
+    # Crear embed para respuesta en el canal
+    sanction_embed = create_embed(
+        title="⚖️ Sanción Aplicada",
+        description=f"Se ha sancionado a {usuario.mention} con éxito.",
+        color=Colors.DANGER,
+        user=interaction.user
+    )
+    sanction_embed.add_field(name="🆔 ID de Sanción", value=sanction_id, inline=False)
+    sanction_embed.add_field(name="👤 Usuario", value=usuario.mention, inline=True)
+    sanction_embed.add_field(name="📝 Motivo", value=motivo, inline=True)
+    sanction_embed.add_field(name="⚠️ Tipo de Sanción", value=tipo_sancion, inline=True)
+    sanction_embed.add_field(name="📸 Pruebas", value=pruebas, inline=False)
+    sanction_embed.add_field(name="👮 Aplicada por", value=interaction.user.mention, inline=True)
+
+    await interaction.followup.send(embed=sanction_embed)
+
+    # Enviar notificación al usuario sancionado
+    dm_embed = create_embed(
+        title="⚖️ Has Recibido una Sanción",
+        description=(
+            f"Has sido sancionado en **Santiago RP**. Aquí están los detalles:\n\n"
+            f"**🆔 ID de Sanción:** {sanction_id}\n"
+            f"**📝 Motivo:** {motivo}\n"
+            f"**⚠️ Tipo de Sanción:** {tipo_sancion}\n"
+            f"**📸 Pruebas:** {pruebas}\n"
+            f"**👮 Aplicada por:** {interaction.user.mention}\n"
+        ),
+        color=Colors.DANGER
+    )
+    dm_embed.add_field(
+        name="📜 ¿Cómo apelar?",
+        value=(
+            f"Puedes apelar esta sanción abriendo un ticket en <#{Channels.TICKETS}> seleccionando la categoría **Apelaciones**. "
+            f"Asegúrate de incluir el **ID de Sanción** ({sanction_id}) y pruebas que respalden tu caso."
+        ),
+        inline=False
+    )
+
+    try:
+        await usuario.send(embed=dm_embed)
+    except discord.errors.Forbidden:
+        await interaction.followup.send(embed=create_embed(
+            title="⚠️ Advertencia",
+            description=f"No se pudo enviar el mensaje directo a {usuario.mention}. Es posible que tenga los DMs cerrados.",
+            color=Colors.WARNING
+        ))
+
+    # Enviar log al canal de sanciones
+    log_channel = bot.get_channel(Channels.SANCTION_LOGS)
+    if log_channel:
+        log_embed = create_embed(
+            title="📜 Registro de Sanción",
+            description=f"Se ha registrado una nueva sanción en el servidor.",
+            color=Colors.DANGER,
+            user=interaction.user
+        )
+        log_embed.add_field(name="🆔 ID de Sanción", value=sanction_id, inline=False)
+        log_embed.add_field(name="👤 Usuario", value=usuario.mention, inline=True)
+        log_embed.add_field(name="📝 Motivo", value=motivo, inline=True)
+        log_embed.add_field(name="⚠️ Tipo de Sanción", value=tipo_sancion, inline=True)
+        log_embed.add_field(name="📸 Pruebas", value=pruebas, inline=False)
+        log_embed.add_field(name="👮 Aplicada por", value=interaction.user.mention, inline=True)
+        
+        await log_channel.send(embed=log_embed)
+
+def is_view_sanctions_channel():
+    async def predicate(interaction: discord.Interaction) -> bool:
+        if interaction.channel_id != Channels.VIEW_SANCTIONS:
+            await interaction.response.send_message(embed=create_embed(
+                title="❌ Canal Incorrecto",
+                description=f"Este comando solo puede usarse en <#{Channels.VIEW_SANCTIONS}>.",
+                color=Colors.DANGER
+            ), ephemeral=True)
+            return False
+        return True
+    return app_commands.check(predicate)
+
+@bot.tree.command(name="ver-sanciones", description="Muestra las sanciones activas de un usuario")
+@is_view_sanctions_channel()
+@app_commands.describe(
+    usuario="Selecciona un usuario para ver sus sanciones (opcional, por defecto muestra las tuyas)"
+)
+async def ver_sanciones(interaction: discord.Interaction, usuario: discord.Member = None):
+    """Comando para ver las sanciones activas de un usuario."""
+    await interaction.response.defer(ephemeral=True)
+
+    # Si no se especifica un usuario, usar el que ejecuta el comando
+    target_user = usuario if usuario else interaction.user
+
+    # Obtener sanciones del usuario
+    sanctions = get_user_sanctions(target_user.id)
+
+    # Crear embed para mostrar sanciones
+    embed = create_embed(
+        title="📜 Sanciones Activas",
+        description=f"Lista de sanciones activas para {target_user.mention}.",
+        color=Colors.INFO,
+        user=target_user
+    )
+
+    if not sanctions:
+        embed.add_field(
+            name="✅ Sin Sanciones",
+            value="Este usuario no tiene sanciones activas actualmente.",
+            inline=False
+        )
+    else:
+        for sanction in sanctions:
+            sanction_id, reason, sanction_type, proof_url, admin_name, date = sanction
+            embed.add_field(
+                name=f"🆔 Sanción {sanction_id[:8]}...",
+                value=(
+                    f"**Motivo:** {reason}\n"
+                    f"**Tipo:** {sanction_type}\n"
+                    f"**Pruebas:** {proof_url}\n"
+                    f"**Aplicada por:** {admin_name}\n"
+                    f"**Fecha:** {datetime.fromisoformat(date).strftime('%d/%m/%Y %H:%M')}"
+                ),
+                inline=False
+            )
+
+    embed.add_field(
+        name="📝 ¿Tienes una sanción injusta?",
+        value=(
+            f"Si crees que alguna sanción es injusta, abre un ticket en <#{Channels.TICKETS}> "
+            "seleccionando la categoría **Apelaciones**. Incluye el **ID de Sanción** y pruebas que respalden tu caso."
+        ),
+        inline=False
+    )
+
+    await interaction.followup.send(embed=embed, ephemeral=True)
+
+@bot.tree.command(name="borrar-sanciones", description="Borra todas las sanciones activas de un usuario")
+@app_commands.checks.has_permissions(administrator=True)
+@app_commands.describe(
+    usuario="Selecciona el usuario cuyas sanciones quieres borrar"
+)
+async def borrar_sanciones(interaction: discord.Interaction, usuario: discord.Member):
+    """Comando para borrar todas las sanciones activas de un usuario."""
+    await interaction.response.defer(ephemeral=True)
+
+    # Contar sanciones activas antes de borrar
+    sanction_count = count_active_sanctions(usuario.id)
+    if sanction_count == 0:
+        await interaction.followup.send(embed=create_embed(
+            title="ℹ️ Sin Sanciones",
+            description=f"{usuario.mention} no tiene sanciones activas para borrar.",
+            color=Colors.INFO,
+            user=interaction.user
+        ), ephemeral=True)
+        return
+
+    # Marcar sanciones como inactivas
+    try:
+        affected_rows = delete_user_sanctions(usuario.id)
+    except Exception as e:
+        print(f"Error al borrar sanciones: {e}")
+        await interaction.followup.send(embed=create_embed(
+            title="❌ Error",
+            description="No se pudieron borrar las sanciones. Por favor, intenta de nuevo o contacta a soporte técnico.",
+            color=Colors.DANGER,
+            user=interaction.user
+        ), ephemeral=True)
+        return
+
+    # Verificar si se borraron sanciones
+    if affected_rows == 0:
+        await interaction.followup.send(embed=create_embed(
+            title="ℹ️ Sin Cambios",
+            description=f"No se encontraron sanciones activas para {usuario.mention}.",
+            color=Colors.INFO,
+            user=interaction.user
+        ), ephemeral=True)
+        return
+
+    # Remover roles de advertencia del usuario
+    sanction_roles = [Roles.WARN_1, Roles.WARN_2, Roles.WARN_3]
+    roles_to_remove = [interaction.guild.get_role(role_id) for role_id in sanction_roles if interaction.guild.get_role(role_id)]
+    try:
+        await usuario.remove_roles(*roles_to_remove, reason=f"Sanciones borradas por {interaction.user.name}")
+    except Exception as e:
+        print(f"Error al remover roles: {e}")
+        await interaction.followup.send(embed=create_embed(
+            title="⚠️ Advertencia",
+            description=f"Las sanciones de {usuario.mention} fueron borradas, pero no se pudieron remover los roles de advertencia. Por favor, verifica los permisos del bot.",
+            color=Colors.WARNING,
+            user=interaction.user
+        ), ephemeral=True)
+        return
+
+    # Enviar respuesta al administrador
+    response_embed = create_embed(
+        title="✅ Sanciones Borradas",
+        description=f"Se han borrado **{affected_rows}** sanciones activas de {usuario.mention}.",
+        color=Colors.SUCCESS,
+        user=interaction.user
+    )
+    response_embed.add_field(name="👤 Usuario", value=usuario.mention, inline=True)
+    response_embed.add_field(name="👮 Borradas por", value=interaction.user.mention, inline=True)
+    await interaction.followup.send(embed=response_embed, ephemeral=True)
+
+    # Enviar notificación al usuario
+    dm_embed = create_embed(
+        title="🔔 Sanciones Eliminadas",
+        description=(
+            f"Todas tus sanciones activas en **Santiago RP** han sido eliminadas.\n\n"
+            f"**Total eliminadas:** {affected_rows}\n"
+            f"**Eliminadas por:** {interaction.user.mention}\n\n"
+            "Asegúrate de seguir las reglas del servidor para evitar futuras sanciones."
+        ),
+        color=Colors.SUCCESS
+    )
+    try:
+        await usuario.send(embed=dm_embed)
+    except discord.errors.Forbidden:
+        response_embed.add_field(
+            name="⚠️ Advertencia",
+            value=f"No se pudo enviar un mensaje directo a {usuario.mention}. Es posible que tenga los DMs cerrados.",
+            inline=False
+        )
+        await interaction.followup.send(embed=response_embed, ephemeral=True)
+
+    # Enviar log al canal de sanciones
+    log_channel = bot.get_channel(Channels.SANCTION_LOGS)
+    if log_channel:
+        log_embed = create_embed(
+            title="🗑️ Sanciones Borradas",
+            description=f"Se han eliminado sanciones activas del servidor.",
+            color=Colors.SUCCESS,
+            user=interaction.user
+        )
+        log_embed.add_field(name="👤 Usuario", value=usuario.mention, inline=True)
+        log_embed.add_field(name="📉 Sanciones eliminadas", value=str(affected_rows), inline=True)
+        log_embed.add_field(name="👮 Borradas por", value=interaction.user.mention, inline=True)
+        await log_channel.send(embed=log_embed)
+
+@bot.tree.command(name="banear-a", description="Aplica un baneo a un usuario")
+@app_commands.checks.has_any_role(*Roles.STAFF)
+@app_commands.describe(
+    usuario="Selecciona el usuario a banear",
+    motivo="Explica por qué se banea al usuario",
+    pruebas="Enlace a las pruebas del baneo (ej. https://imgur.com/abc)"
+)
+async def banear_a(interaction: discord.Interaction, usuario: discord.Member, motivo: str, pruebas: str):
+    """Comando para banear a un usuario."""
+    # Verificar canal correcto
+    if interaction.channel_id != 1357151556926963748:
+        await interaction.response.send_message(embed=create_embed(
+            title="❌ Canal Incorrecto",
+            description=f"Este comando solo puede usarse en <#{1357151556926963748}>.",
+            color=Colors.DANGER
+        ), ephemeral=True)
+        return
+
+    await interaction.response.defer()
+
+    # Guardar baneo en la base de datos
+    sanction_id = save_sanction(
+        user_id=usuario.id,
+        username=usuario.name,
+        reason=motivo,
+        sanction_type="Baneo",
+        proof_url=pruebas,
+        admin_id=interaction.user.id,
+        admin_name=interaction.user.name
+    )
+
+    # Aplicar baneo
+    try:
+        await interaction.guild.ban(
+            usuario,
+            reason=f"Baneo aplicado por {interaction.user.name}: {motivo}",
+            delete_message_days=0
+        )
+    except Exception as e:
+        print(f"Error al banear usuario: {e}")
+        await interaction.followup.send(embed=create_embed(
+            title="❌ Error",
+            description="No se pudo aplicar el baneo. Por favor, verifica los permisos del bot.",
+            color=Colors.DANGER
+        ))
+        return
+
+    # Crear embed para respuesta en el canal
+    ban_embed = create_embed(
+        title="🚫 Baneo Aplicado",
+        description=f"Se ha baneado a {usuario.mention} con éxito.",
+        color=Colors.DANGER,
+        user=interaction.user
+    )
+    ban_embed.add_field(name="🆔 ID de Baneo", value=sanction_id, inline=False)
+    ban_embed.add_field(name="👤 Usuario", value=usuario.mention, inline=True)
+    ban_embed.add_field(name="📝 Motivo", value=motivo, inline=True)
+    ban_embed.add_field(name="📸 Pruebas", value=pruebas, inline=False)
+    ban_embed.add_field(name="👮 Aplicado por", value=interaction.user.mention, inline=True)
+
+    await interaction.followup.send(embed=ban_embed)
+
+    # Enviar notificación al usuario baneado
+    dm_embed = create_embed(
+        title="🚫 Has Sido Baneado",
+        description=(
+            f"Has sido baneado en **Santiago RP**. Aquí están los detalles:\n\n"
+            f"**🆔 ID de Baneo:** {sanction_id}\n"
+            f"**📝 Motivo:** {motivo}\n"
+            f"**📸 Pruebas:** {pruebas}\n"
+            f"**👮 Aplicado por:** {interaction.user.mention}\n"
+        ),
+        color=Colors.DANGER
+    )
+    dm_embed.add_field(
+        name="📜 ¿Cómo apelar?",
+        value=(
+            f"Puedes apelar este baneo abriendo un ticket en <#{Channels.TICKETS}> seleccionando la categoría **Apelaciones**. "
+            f"Asegúrate de incluir el **ID de Baneo** ({sanction_id}) y pruebas que respalden tu caso."
+        ),
+        inline=False
+    )
+
+    try:
+        await usuario.send(embed=dm_embed)
+    except discord.errors.Forbidden:
+        await interaction.followup.send(embed=create_embed(
+            title="⚠️ Advertencia",
+            description=f"No se pudo enviar el mensaje directo a {usuario.mention}. Es posible que tenga los DMs cerrados.",
+            color=Colors.WARNING
+        ))
+
+    # Enviar log al canal de sanciones
+    log_channel = bot.get_channel(Channels.SANCTION_LOGS)
+    if log_channel:
+        log_embed = create_embed(
+            title="📜 Registro de Baneo",
+            description=f"Se ha registrado un nuevo baneo en el servidor.",
+            color=Colors.DANGER,
+            user=interaction.user
+        )
+        log_embed.add_field(name="🆔 ID de Baneo", value=sanction_id, inline=False)
+        log_embed.add_field(name="👤 Usuario", value=usuario.mention, inline=True)
+        log_embed.add_field(name="📝 Motivo", value=motivo, inline=True)
+        log_embed.add_field(name="📸 Pruebas", value=pruebas, inline=False)
+        log_embed.add_field(name="👮 Aplicado por", value=interaction.user.mention, inline=True)
+        
+        await log_channel.send(embed=log_embed)
+
+async def weekly_top_staff():
+    """Tarea semanal para anunciar el mejor staff y reiniciar calificaciones."""
+    while True:
+        now = datetime.now(pytz.UTC)
+        next_monday = now + timedelta(days=(7 - now.weekday()) % 7)
+        next_monday = next_monday.replace(hour=0, minute=0, second=0, microsecond=0)
+        if now.weekday() == 0 and now.hour == 0:  # Si ya es lunes 00:00
+            next_monday += timedelta(days=7)
+        seconds_until_monday = (next_monday - now).total_seconds()
+
+        await asyncio.sleep(seconds_until_monday)
+
+        channel = bot.get_channel(Channels.RATINGS)
+        if not channel:
+            print("⚠️ Canal de calificaciones no encontrado.")
+            continue
+
+        top_staff = get_top_staff()
+        if top_staff:
+            staff_id, staff_name, avg_rating, count = top_staff
+            embed = create_embed(
+                title="🏆 Staff de la Semana",
+                description=(
+                    f"¡Felicidades a <@{staff_id}> por ser el **Staff de la Semana**! 🎉\n\n"
+                    f"**Promedio:** {avg_rating:.2f}/5 🌟\n"
+                    f"**Calificaciones recibidas:** {count}\n\n"
+                    "Las calificaciones han sido reiniciadas. ¡Sigue apoyando a nuestro equipo!"
+                ),
+                color=Colors.SUCCESS
+            )
+            embed.set_thumbnail(url=bot.get_user(staff_id).display_avatar.url if bot.get_user(staff_id) else None)
+            await channel.send(embed=embed)
+
+            # Notificar al staff ganador
+            staff_member = bot.get_user(staff_id)
+            if staff_member:
+                try:
+                    dm_embed = create_embed(
+                        title="🎉 ¡Eres el Staff de la Semana!",
+                        description=(
+                            f"¡Felicidades, {staff_name}! Has sido elegido como el **Staff de la Semana** en **Santiago RP**.\n\n"
+                            f"**Promedio:** {avg_rating:.2f}/5 🌟\n"
+                            f"**Calificaciones recibidas:** {count}\n\n"
+                            "Gracias por tu excelente trabajo. ¡Sigue así!"
+                        ),
+                        color=Colors.SUCCESS
+                    )
+                    await staff_member.send(embed=dm_embed)
+                except discord.errors.Forbidden:
+                    print(f"⚠️ No se pudo enviar DM a {staff_name} (DMs cerrados).")
+
+        else:
+            embed = create_embed(
+                title="📊 Calificaciones Semanales",
+                description="No hay suficientes calificaciones esta semana (mínimo 3 por staff). ¡Sigue calificando a nuestro equipo!",
+                color=Colors.INFO
+            )
+            await channel.send(embed=embed)
+
+        # Borrar calificaciones
+        clear_ratings()
+
+        # Log en SANCTION_LOGS
+        log_channel = bot.get_channel(Channels.SANCTION_LOGS)
+        if log_channel:
+            log_embed = create_embed(
+                title="🔄 Reinicio de Calificaciones",
+                description="Se han reiniciado las calificaciones semanales.",
+                color=Colors.INFO
+            )
+            if top_staff:
+                log_embed.add_field(name="🏆 Staff de la Semana", value=f"<@{staff_id}> ({avg_rating:.2f}/5)", inline=True)
+            await log_channel.send(embed=log_embed)
+
+@bot.tree.command(name="calificar-staff", description="Califica a un miembro del staff")
+@is_ratings_channel()
+@app_commands.autocomplete(calificacion=rating_autocomplete)
+@app_commands.describe(
+    usuario="Selecciona el miembro del staff a calificar",
+    calificacion="Elige una calificación de 1 a 5 estrellas",
+    comentario="Explica por qué das esta calificación"
+)
+async def calificar_staff(interaction: discord.Interaction, usuario: discord.Member, calificacion: str, comentario: str):
+    """Comando para calificar a un miembro del staff."""
+    # Verificar que el usuario tiene un rol de STAFF
+    if not any(role.id in Roles.STAFF for role in usuario.roles):
+        await interaction.response.send_message(embed=create_embed(
+            title="❌ Usuario No Válido",
+            description=f"{usuario.mention} no es miembro del staff.",
+            color=Colors.DANGER
+        ), ephemeral=True)
+        return
+
+    # Validar calificación
+    try:
+        rating = int(calificacion)
+        if rating < 1 or rating > 5:
+            raise ValueError
+    except ValueError:
+        await interaction.response.send_message(embed=create_embed(
+            title="❌ Calificación Inválida",
+            description="Por favor, selecciona una calificación entre 1 y 5 estrellas.",
+            color=Colors.DANGER
+        ), ephemeral=True)
+        return
+
+    await interaction.response.defer()
+
+    # Guardar calificación en la base de datos
+    rating_id = save_rating(
+        staff_id=usuario.id,
+        staff_name=usuario.name,
+        rating=rating,
+        comment=comentario,
+        user_id=interaction.user.id,
+        user_name=interaction.user.name
+    )
+
+    # Crear embed para respuesta en el canal
+    rating_embed = create_embed(
+        title="🌟 Calificación Registrada",
+        description=f"Se ha registrado tu calificación para {usuario.mention}.",
+        color=Colors.SUCCESS,
+        user=interaction.user
+    )
+    rating_embed.add_field(name="🆔 ID de Calificación", value=rating_id, inline=False)
+    rating_embed.add_field(name="👤 Staff", value=usuario.mention, inline=True)
+    rating_embed.add_field(name="🌟 Calificación", value="🌟" * rating, inline=True)
+    rating_embed.add_field(name="💬 Comentario", value=comentario, inline=False)
+    rating_embed.add_field(name="👥 Calificado por", value=interaction.user.mention, inline=True)
+
+    await interaction.followup.send(embed=rating_embed)
+
+    # Enviar notificación al staff calificado
+    dm_embed = create_embed(
+        title="🌟 Nueva Calificación Recibida",
+        description=(
+            f"Has recibido una calificación en **Santiago RP**. Aquí están los detalles:\n\n"
+            f"**🆔 ID de Calificación:** {rating_id}\n"
+            f"**🌟 Calificación:** {'🌟' * rating} ({rating}/5)\n"
+            f"**💬 Comentario:** {comentario}\n"
+            f"**👥 Calificado por:** {interaction.user.mention}"
+        ),
+        color=Colors.SUCCESS
+    )
+
+    try:
+        await usuario.send(embed=dm_embed)
+    except discord.errors.Forbidden:
+        await interaction.followup.send(embed=create_embed(
+            title="⚠️ Advertencia",
+            description=f"No se pudo enviar el mensaje directo a {usuario.mention}. Es posible que tenga los DMs cerrados.",
+            color=Colors.WARNING
+        ))
+
+    # Enviar log al canal de sanciones
+    log_channel = bot.get_channel(Channels.SANCTION_LOGS)
+    if log_channel:
+        log_embed = create_embed(
+            title="📜 Registro de Calificación",
+            description=f"Se ha registrado una nueva calificación para un miembro del staff.",
+            color=Colors.SUCCESS,
+            user=interaction.user
+        )
+        log_embed.add_field(name="🆔 ID de Calificación", value=rating_id, inline=False)
+        log_embed.add_field(name="👤 Staff", value=usuario.mention, inline=True)
+        log_embed.add_field(name="🌟 Calificación", value=f"{'🌟' * rating} ({rating}/5)", inline=True)
+        log_embed.add_field(name="💬 Comentario", value=comentario, inline=False)
+        log_embed.add_field(name="👥 Calificado por", value=interaction.user.mention, inline=True)
+        
+        await log_channel.send(embed=log_embed)
+
+def is_view_sanctions_channel():
+    async def predicate(interaction: discord.Interaction) -> bool:
+        if interaction.channel_id != Channels.VIEW_SANCTIONS:
+            await interaction.response.send_message(embed=create_embed(
+                title="❌ Canal Incorrecto",
+                description=f"Este comando solo puede usarse en <#{Channels.VIEW_SANCTIONS}>.",
+                color=Colors.DANGER
+            ), ephemeral=True)
+            return False
+        return True
+    return app_commands.check(predicate)
+
+@bot.tree.command(name="ayuda", description="Muestra todos los comandos disponibles del bot")
+async def ayuda(interaction: discord.Interaction):
+    """Comando para mostrar la lista de todos los comandos disponibles."""
+    await interaction.response.defer(ephemeral=True)
+
+    embed = create_embed(
+        title="📖 Guía de Comandos de Santiago RP",
+        description=(
+            "¡Bienvenido a la guía de comandos de **Santiago RP**! 🎉\n"
+            "A continuación, encontrarás todos los comandos disponibles, qué hacen, dónde usarlos y quiénes pueden ejecutarlos."
+        ),
+        color=Colors.INFO,
+        user=interaction.user
+    )
+
+    # Lista de comandos con sus detalles
+    commands_list = [
+        {
+            "name": "panel",
+            "emoji": "⚙️",
+            "description": "Despliega el panel de control para gestionar el servidor (abrir servidor, iniciar votación).",
+            "channel": f"Cualquier canal",
+            "permissions": "Staff (roles: <@&1357151555916271624>, <@&1357151555916271622>, etc.)"
+        },
+        {
+            "name": "tickets",
+            "emoji": "🎫",
+            "description": "Abre el sistema interactivo de tickets para reportes, apelaciones, etc.",
+            "channel": f"<#{Channels.TICKETS}>",
+            "permissions": "Todos"
+        },
+        {
+            "name": "sancionar-a",
+            "emoji": "⚖️",
+            "description": "Aplica una sanción (Advertencia 1, 2 o 3) a un usuario con motivo y pruebas.",
+            "channel": f"<#{Channels.SANCTIONS}>",
+            "permissions": "Staff (roles: <@&1357151555916271624>, <@&1357151555916271622>, etc.)"
+        },
+        {
+            "name": "ver-sanciones",
+            "emoji": "📜",
+            "description": "Muestra las sanciones activas de un usuario (tuyas o de otro).",
+            "channel": f"<#{Channels.VIEW_SANCTIONS}>",
+            "permissions": "Todos"
+        },
+        {
+            "name": "borrar-sanciones",
+            "emoji": "🗑️",
+            "description": "Elimina todas las sanciones activas de un usuario.",
+            "channel": "Cualquier canal",
+            "permissions": "Administradores (permiso: Administrador)"
+        },
+        {
+            "name": "banear-a",
+            "emoji": "🚫",
+            "description": "Banea a un usuario con motivo y pruebas.",
+            "channel": f"<#1357151556926963748>",
+            "permissions": "Staff (roles: <@&1357151555916271624>, <@&1357151555916271622>, etc.)"
+        },
+        {
+            "name": "calificar-staff",
+            "emoji": "🌟",
+            "description": "Califica a un miembro del staff con estrellas (1 a 5) y un comentario.",
+            "channel": f"<#{Channels.RATINGS}>",
+            "permissions": "Todos"
+        },
+        {
+            "name": "postular-trabajo",
+            "emoji": "💼",
+            "description": "Postula a un trabajo en Santiago RP (Meganoticias, Taxista, etc.).",
+            "channel": f"<#{Channels.JOB_APPLICATIONS}>",
+            "permissions": "Todos"
+        }
+    ]
+
+    # Añadir cada comando como un campo en el embed
+    for cmd in commands_list:
+        embed.add_field(
+            name=f"{cmd['emoji']} /{cmd['name']}",
+            value=(
+                f"**Descripción:** {cmd['description']}\n"
+                f"**Canal:** {cmd['channel']}\n"
+                f"**Permisos:** {cmd['permissions']}"
+            ),
+            inline=False
+        )
+
+    embed.set_thumbnail(url=interaction.guild.icon.url if interaction.guild.icon else "")
+    embed.set_footer(text="Santiago RP | Sistema Automatizado | Creado por Smile")
+
+    await interaction.followup.send(embed=embed, ephemeral=True)
+
+async def job_role_autocomplete(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
+    """Autocompletar trabajos disponibles."""
+    return [
+        app_commands.Choice(name=job["name"], value=job_key)
+        for job_key, job in JOB_ROLES.items()
+        if current.lower() in job["name"].lower()
+    ]
+
+class AcceptJobModal(ui.Modal, title="✅ Aceptar Postulación"):
+    reason = ui.TextInput(
+        label="Razón de la aceptación",
+        placeholder="Explica por qué se aceptó la postulación (mínimo 10 palabras)...",
+        style=discord.TextStyle.long,
+        required=True,
+        min_length=50  # Approximate minimum for 10 words
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        self.interaction = interaction
+
+class DenyJobModal(ui.Modal, title="❌ Denegar Postulación"):
+    reason = ui.TextInput(
+        label="Razón de la denegación",
+        placeholder="Explica por qué se denegó la postulación (mínimo 10 palabras)...",
+        style=discord.TextStyle.long,
+        required=True,
+        min_length=50  # Approximate minimum for 10 words
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        self.interaction = interaction
+
+class JobApplicationView(ui.View):
+    """Vista con botones para aceptar o denegar postulaciones."""
+    def __init__(self, applicant: discord.Member, job_key: str, reason: str):
+        super().__init__(timeout=None)
+        self.applicant = applicant
+        self.job_key = job_key
+        self.reason = reason
+        self.custom_id = f"job_application_{applicant.id}_{job_key}"
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        """Verificar que el usuario tenga permisos de staff."""
+        if not any(role.id in Roles.STAFF for role in interaction.user.roles):
+            await interaction.response.send_message(embed=create_embed(
+                title="❌ Acceso Denegado",
+                description="Solo el staff puede aceptar o denegar postulaciones.",
+                color=Colors.DANGER
+            ), ephemeral=True)
+            return False
+        return True
+
+    @ui.button(label="Aceptar", style=discord.ButtonStyle.green, emoji="✅", custom_id="job_accept")
+    async def accept_button(self, interaction: discord.Interaction, button: ui.Button):
+        modal = AcceptJobModal()
+        await interaction.response.send_modal(modal)
+        
+        timed_out = await modal.wait()
+        if timed_out:
+            return
+
+        # Validate reason length
+        reason_words = modal.reason.value.split()
+        if len(reason_words) < 10:
+            await modal.interaction.followup.send(embed=create_embed(
+                title="❌ Razón Inválida",
+                description="La razón debe tener al menos 10 palabras.",
+                color=Colors.DANGER
+            ), ephemeral=True)
+            return
+
+        # Update embed to green (accepted)
+        embed = interaction.message.embeds[0]
+        embed.color = Colors.SUCCESS
+        embed.set_field_at(
+            index=len(embed.fields) - 1,
+            name="📋 Estado",
+            value=f"**Aceptada** por {interaction.user.mention}\n**Razón:** {modal.reason.value}",
+            inline=False
+        )
+        
+        # Disable buttons
+        self.children[0].disabled = True
+        self.children[1].disabled = True
+        await interaction.message.edit(embed=embed, view=self)
+
+        # Assign job role and sueldo role
+        job_role = interaction.guild.get_role(JOB_ROLES[self.job_key]["role_id"])
+        sueldo_role = interaction.guild.get_role(Roles.SUELDO)
+        try:
+            await self.applicant.add_roles(job_role, sueldo_role, reason=f"Postulación aceptada por {interaction.user.name}")
+        except Exception as e:
+            print(f"Error al asignar roles: {e}")
+            await modal.interaction.followup.send(embed=create_embed(
+                title="❌ Error",
+                description="No se pudieron asignar los roles. Verifica los permisos del bot.",
+                color=Colors.DANGER
+            ), ephemeral=True)
+            return
+
+        # Send notification to job applications channel
+        job_channel = bot.get_channel(Channels.JOB_APPLICATIONS)
+        if job_channel:
+            await job_channel.send(
+                content=f"🎉 {self.applicant.mention}, ¡tu postulación al trabajo **{JOB_ROLES[self.job_key]['name']}** ha sido **aceptada**! Se te ha asignado un sueldo de **550,000 CLP**.",
+                embed=create_embed(
+                    title="✅ Postulación Aceptada",
+                    description=(
+                        f"**Usuario:** {self.applicant.mention}\n"
+                        f"**Trabajo:** {JOB_ROLES[self.job_key]['name']}\n"
+                        f"**Razón de aceptación:** {modal.reason.value}\n"
+                        f"**Aprobado por:** {interaction.user.mention}"
+                    ),
+                    color=Colors.SUCCESS,
+                    user=interaction.user
+                )
+            )
+
+        # Send DM to applicant
+        dm_embed = create_embed(
+            title="🎉 ¡Postulación Aceptada!",
+            description=(
+                f"¡Felicidades, {self.applicant.mention}! Tu postulación al trabajo **{JOB_ROLES[self.job_key]['name']}** en **Santiago RP** ha sido **aceptada**.\n\n"
+                f"**Razón de aceptación:** {modal.reason.value}\n"
+                f"**Sueldo asignado:** 550,000 CLP\n"
+                f"**Aprobado por:** {interaction.user.mention}\n\n"
+                "¡Prepárate para comenzar tu nuevo rol! Contacta al staff si necesitas orientación."
+            ),
+            color=Colors.SUCCESS
+        )
+        try:
+            await self.applicant.send(embed=dm_embed)
+        except discord.errors.Forbidden:
+            await modal.interaction.followup.send(embed=create_embed(
+                title="⚠️ Advertencia",
+                description=f"No se pudo enviar el mensaje directo a {self.applicant.mention}. Es posible que tenga los DMs cerrados.",
+                color=Colors.WARNING
+            ), ephemeral=True)
+
+        # Send log to sanction logs
+        log_channel = bot.get_channel(Channels.SANCTION_LOGS)
+        if log_channel:
+            log_embed = create_embed(
+                title="📜 Postulación Aceptada",
+                description=f"Se ha aceptado una postulación al trabajo {JOB_ROLES[self.job_key]['name']}.",
+                color=Colors.SUCCESS,
+                user=interaction.user
+            )
+            log_embed.add_field(name="👤 Usuario", value=self.applicant.mention, inline=True)
+            log_embed.add_field(name="💼 Trabajo", value=JOB_ROLES[self.job_key]['name'], inline=True)
+            log_embed.add_field(name="📝 Razón de aceptación", value=modal.reason.value, inline=False)
+            log_embed.add_field(name="👮 Aprobado por", value=interaction.user.mention, inline=True)
+            await log_channel.send(embed=log_embed)
+
+        await modal.interaction.followup.send(embed=create_embed(
+            title="✅ Acción Completada",
+            description=f"La postulación de {self.applicant.mention} al trabajo {JOB_ROLES[self.job_key]['name']} ha sido aceptada.",
+            color=Colors.SUCCESS
+        ), ephemeral=True)
+
+    @ui.button(label="Denegar", style=discord.ButtonStyle.red, emoji="❌", custom_id="job_deny")
+    async def deny_button(self, interaction: discord.Interaction, button: ui.Button):
+        modal = DenyJobModal()
+        await interaction.response.send_modal(modal)
+        
+        timed_out = await modal.wait()
+        if timed_out:
+            return
+
+        # Validate reason length
+        reason_words = modal.reason.value.split()
+        if len(reason_words) < 10:
+            await modal.interaction.followup.send(embed=create_embed(
+                title="❌ Razón Inválida",
+                description="La razón debe tener al menos 10 palabras.",
+                color=Colors.DANGER
+            ), ephemeral=True)
+            return
+
+        # Update embed to red (denied)
+        embed = interaction.message.embeds[0]
+        embed.color = Colors.DANGER
+        embed.set_field_at(
+            index=len(embed.fields) - 1,
+            name="📋 Estado",
+            value=f"**Denegada** por {interaction.user.mention}\n**Razón:** {modal.reason.value}",
+            inline=False
+        )
+        
+        # Disable buttons
+        self.children[0].disabled = True
+        self.children[1].disabled = True
+        await interaction.message.edit(embed=embed, view=self)
+
+        # Send notification to job applications channel
+        job_channel = bot.get_channel(Channels.JOB_APPLICATIONS)
+        if job_channel:
+            await job_channel.send(
+                content=f"😔 {self.applicant.mention}, tu postulación al trabajo **{JOB_ROLES[self.job_key]['name']}** ha sido **denegada**.",
+                embed=create_embed(
+                    title="❌ Postulación Denegada",
+                    description=(
+                        f"**Usuario:** {self.applicant.mention}\n"
+                        f"**Trabajo:** {JOB_ROLES[self.job_key]['name']}\n"
+                        f"**Razón de denegación:** {modal.reason.value}\n"
+                        f"**Denegado por:** {interaction.user.mention}"
+                    ),
+                    color=Colors.DANGER,
+                    user=interaction.user
+                )
+            )
+
+        # Send DM to applicant
+        dm_embed = create_embed(
+            title="😔 Postulación Denegada",
+            description=(
+                f"Lo sentimos, {self.applicant.mention}. Tu postulación al trabajo **{JOB_ROLES[self.job_key]['name']}** en **Santiago RP** ha sido **denegada**.\n\n"
+                f"**Razón de denegación:** {modal.reason.value}\n"
+                f"**Denegado por:** {interaction.user.mention}\n\n"
+                "Puedes intentar postular nuevamente en el futuro. Si tienes dudas, abre un ticket en el canal de soporte."
+            ),
+            color=Colors.DANGER
+        )
+        try:
+            await self.applicant.send(embed=dm_embed)
+        except discord.errors.Forbidden:
+            await modal.interaction.followup.send(embed=create_embed(
+                title="⚠️ Advertencia",
+                description=f"No se pudo enviar el mensaje directo a {self.applicant.mention}. Es posible que tenga los DMs cerrados.",
+                color=Colors.WARNING
+            ), ephemeral=True)
+
+        # Send log to sanction logs
+        log_channel = bot.get_channel(Channels.SANCTION_LOGS)
+        if log_channel:
+            log_embed = create_embed(
+                title="📜 Postulación Denegada",
+                description=f"Se ha denegado una postulación al trabajo {JOB_ROLES[self.job_key]['name']}.",
+                color=Colors.DANGER,
+                user=interaction.user
+            )
+            log_embed.add_field(name="👤 Usuario", value=self.applicant.mention, inline=True)
+            log_embed.add_field(name="💼 Trabajo", value=JOB_ROLES[self.job_key]['name'], inline=True)
+            log_embed.add_field(name="📝 Razón de denegación", value=modal.reason.value, inline=False)
+            log_embed.add_field(name="👮 Denegado por", value=interaction.user.mention, inline=True)
+            await log_channel.send(embed=log_embed)
+
+        await modal.interaction.followup.send(embed=create_embed(
+            title="✅ Acción Completada",
+            description=f"La postulación de {self.applicant.mention} al trabajo {JOB_ROLES[self.job_key]['name']} ha sido denegada.",
+            color=Colors.SUCCESS
+        ), ephemeral=True)
+
+def is_job_applications_channel():
+    async def predicate(interaction: discord.Interaction) -> bool:
+        if interaction.channel_id != Channels.JOB_APPLICATIONS:
+            await interaction.response.send_message(embed=create_embed(
+                title="❌ Canal Incorrecto",
+                description=f"Este comando solo puede usarse en <#{Channels.JOB_APPLICATIONS}>.",
+                color=Colors.DANGER
+            ), ephemeral=True)
+            return False
+        return True
+    return app_commands.check(predicate)
+
+class JobApplicationView(ui.View):
+    """Vista con botones para aceptar o denegar postulaciones."""
+    def __init__(self, applicant: discord.Member, job_key: str, reason: str):
+        super().__init__(timeout=None)
+        self.applicant = applicant
+        self.job_key = job_key
+        self.reason = reason
+        self.custom_id = f"job_application_{applicant.id}_{job_key}"
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        """Verificar que el usuario tenga permisos de staff."""
+        if not any(role.id in Roles.STAFF for role in interaction.user.roles):
+            await interaction.response.send_message(embed=create_embed(
+                title="❌ Acceso Denegado",
+                description="Solo el staff puede aceptar o denegar postulaciones.",
+                color=Colors.DANGER
+            ), ephemeral=True)
+            return False
+        return True
+
+    @ui.button(label="Aceptar", style=discord.ButtonStyle.green, emoji="✅", custom_id="job_accept")
+    async def accept_button(self, interaction: discord.Interaction, button: ui.Button):
+        modal = AcceptJobModal()
+        await interaction.response.send_modal(modal)
+        
+        timed_out = await modal.wait()
+        if timed_out:
+            return
+
+        # Validate reason length
+        reason_words = modal.reason.value.split()
+        if len(reason_words) < 10:
+            await modal.interaction.followup.send(embed=create_embed(
+                title="❌ Razón Inválida",
+                description="La razón debe tener al menos 10 palabras.",
+                color=Colors.DANGER
+            ), ephemeral=True)
+            return
+
+        # Update embed to green (accepted)
+        embed = interaction.message.embeds[0]
+        embed.color = Colors.SUCCESS
+        embed.set_field_at(
+            index=len(embed.fields) - 1,
+            name="📋 Estado",
+            value=f"**Aceptada** por {interaction.user.mention}\n**Razón:** {modal.reason.value}",
+            inline=False
+        )
+        
+        # Disable buttons
+        self.children[0].disabled = True
+        self.children[1].disabled = True
+        await interaction.message.edit(embed=embed, view=self)
+
+        # Assign job role and sueldo role
+        job_role = interaction.guild.get_role(JOB_ROLES[self.job_key]["role_id"])
+        sueldo_role = interaction.guild.get_role(Roles.SUELDO)
+        try:
+            await self.applicant.add_roles(job_role, sueldo_role, reason=f"Postulación aceptada por {interaction.user.name}")
+        except Exception as e:
+            print(f"Error al asignar roles: {e}")
+            await modal.interaction.followup.send(embed=create_embed(
+                title="❌ Error",
+                description="No se pudieron asignar los roles. Verifica los permisos del bot.",
+                color=Colors.DANGER
+            ), ephemeral=True)
+            return
+
+        # Send notification to job applications channel
+        job_channel = bot.get_channel(Channels.JOB_APPLICATIONS)
+        if job_channel:
+            await job_channel.send(
+                content=f"🎉 {self.applicant.mention}, ¡tu postulación al trabajo **{JOB_ROLES[self.job_key]['name']}** ha sido **aceptada**! Se te ha asignado un sueldo de **550,000 CLP**.",
+                embed=create_embed(
+                    title="✅ Postulación Aceptada",
+                    description=(
+                        f"**Usuario:** {self.applicant.mention}\n"
+                        f"**Trabajo:** {JOB_ROLES[self.job_key]['name']}\n"
+                        f"**Razón de aceptación:** {modal.reason.value}\n"
+                        f"**Aprobado por:** {interaction.user.mention}"
+                    ),
+                    color=Colors.SUCCESS,
+                    user=interaction.user
+                )
+            )
+
+        # Send DM to applicant
+        dm_embed = create_embed(
+            title="🎉 ¡Postulación Aceptada!",
+            description=(
+                f"¡Felicidades, {self.applicant.mention}! Tu postulación al trabajo **{JOB_ROLES[self.job_key]['name']}** en **Santiago RP** ha sido **aceptada**.\n\n"
+                f"**Razón de aceptación:** {modal.reason.value}\n"
+                f"**Sueldo asignado:** 550,000 CLP\n"
+                f"**Aprobado por:** {interaction.user.mention}\n\n"
+                "¡Prepárate para comenzar tu nuevo rol! Contacta al staff si necesitas orientación."
+            ),
+            color=Colors.SUCCESS
+        )
+        try:
+            await self.applicant.send(embed=dm_embed)
+        except discord.errors.Forbidden:
+            await modal.interaction.followup.send(embed=create_embed(
+                title="⚠️ Advertencia",
+                description=f"No se pudo enviar el mensaje directo a {self.applicant.mention}. Es posible que tenga los DMs cerrados.",
+                color=Colors.WARNING
+            ), ephemeral=True)
+
+        # Send log to job logs channel (changed from SANCTION_LOGS to JOB_LOGS)
+        log_channel = bot.get_channel(Channels.JOB_LOGS)
+        if log_channel:
+            log_embed = create_embed(
+                title="📜 Postulación Aceptada",
+                description=f"Se ha aceptado una postulación al trabajo {JOB_ROLES[self.job_key]['name']}.",
+                color=Colors.SUCCESS,
+                user=interaction.user
+            )
+            log_embed.add_field(name="👤 Usuario", value=self.applicant.mention, inline=True)
+            log_embed.add_field(name="💼 Trabajo", value=JOB_ROLES[self.job_key]['name'], inline=True)
+            log_embed.add_field(name="📝 Razón de aceptación", value=modal.reason.value, inline=False)
+            log_embed.add_field(name="👮 Aprobado por", value=interaction.user.mention, inline=True)
+            await log_channel.send(embed=log_embed)
+
+        await modal.interaction.followup.send(embed=create_embed(
+            title="✅ Acción Completada",
+            description=f"La postulación de {self.applicant.mention} al trabajo {JOB_ROLES[self.job_key]['name']} ha sido aceptada.",
+            color=Colors.SUCCESS
+        ), ephemeral=True)
+
+    @ui.button(label="Denegar", style=discord.ButtonStyle.red, emoji="❌", custom_id="job_deny")
+    async def deny_button(self, interaction: discord.Interaction, button: ui.Button):
+        modal = DenyJobModal()
+        await interaction.response.send_modal(modal)
+        
+        timed_out = await modal.wait()
+        if timed_out:
+            return
+
+        # Validate reason length
+        reason_words = modal.reason.value.split()
+        if len(reason_words) < 10:
+            await modal.interaction.followup.send(embed=create_embed(
+                title="❌ Razón Inválida",
+                description="La razón debe tener al menos 10 palabras.",
+                color=Colors.DANGER
+            ), ephemeral=True)
+            return
+
+        # Update embed to red (denied)
+        embed = interaction.message.embeds[0]
+        embed.color = Colors.DANGER
+        embed.set_field_at(
+            index=len(embed.fields) - 1,
+            name="📋 Estado",
+            value=f"**Denegada** por {interaction.user.mention}\n**Razón:** {modal.reason.value}",
+            inline=False
+        )
+        
+        # Disable buttons
+        self.children[0].disabled = True
+        self.children[1].disabled = True
+        await interaction.message.edit(embed=embed, view=self)
+
+        # Send notification to job applications channel
+        job_channel = bot.get_channel(Channels.JOB_APPLICATIONS)
+        if job_channel:
+            await job_channel.send(
+                content=f"😔 {self.applicant.mention}, tu postulación al trabajo **{JOB_ROLES[self.job_key]['name']}** ha sido **denegada**.",
+                embed=create_embed(
+                    title="❌ Postulación Denegada",
+                    description=(
+                        f"**Usuario:** {self.applicant.mention}\n"
+                        f"**Trabajo:** {JOB_ROLES[self.job_key]['name']}\n"
+                        f"**Razón de denegación:** {modal.reason.value}\n"
+                        f"**Denegado por:** {interaction.user.mention}"
+                    ),
+                    color=Colors.DANGER,
+                    user=interaction.user
+                )
+            )
+
+        # Send DM to applicant
+        dm_embed = create_embed(
+            title="😔 Postulación Denegada",
+            description=(
+                f"Lo sentimos, {self.applicant.mention}. Tu postulación al trabajo **{JOB_ROLES[self.job_key]['name']}** en **Santiago RP** ha sido **denegada**.\n\n"
+                f"**Razón de denegación:** {modal.reason.value}\n"
+                f"**Denegado por:** {interaction.user.mention}\n\n"
+                "Puedes intentar postular nuevamente en el futuro. Si tienes dudas, abre un ticket en el canal de soporte."
+            ),
+            color=Colors.DANGER
+        )
+        try:
+            await self.applicant.send(embed=dm_embed)
+        except discord.errors.Forbidden:
+            await modal.interaction.followup.send(embed=create_embed(
+                title="⚠️ Advertencia",
+                description=f"No se pudo enviar el mensaje directo a {self.applicant.mention}. Es posible que tenga los DMs cerrados.",
+                color=Colors.WARNING
+            ), ephemeral=True)
+
+        # Send log to job logs channel (changed from SANCTION_LOGS to JOB_LOGS)
+        log_channel = bot.get_channel(Channels.JOB_LOGS)
+        if log_channel:
+            log_embed = create_embed(
+                title="📜 Postulación Denegada",
+                description=f"Se ha denegado una postulación al trabajo {JOB_ROLES[self.job_key]['name']}.",
+                color=Colors.DANGER,
+                user=interaction.user
+            )
+            log_embed.add_field(name="👤 Usuario", value=self.applicant.mention, inline=True)
+            log_embed.add_field(name="💼 Trabajo", value=JOB_ROLES[self.job_key]['name'], inline=True)
+            log_embed.add_field(name="📝 Razón de denegación", value=modal.reason.value, inline=False)
+            log_embed.add_field(name="👮 Denegado por", value=interaction.user.mention, inline=True)
+            await log_channel.send(embed=log_embed)
+
+        await modal.interaction.followup.send(embed=create_embed(
+            title="✅ Acción Completada",
+            description=f"La postulación de {self.applicant.mention} al trabajo {JOB_ROLES[self.job_key]['name']} ha sido denegada.",
+            color=Colors.SUCCESS
+        ), ephemeral=True)
+
+@bot.tree.command(name="postular-trabajo", description="Postula a un trabajo en Santiago RP")
+@is_job_applications_channel()
+@app_commands.autocomplete(trabajo=job_role_autocomplete)
+@app_commands.describe(
+    trabajo="Selecciona el trabajo al que deseas postular",
+    razon="Explica por qué quieres postular a este trabajo (mínimo 10 palabras)"
+)
+async def postular_trabajo(interaction: discord.Interaction, trabajo: str, razon: str):
+    """Comando para postular a un trabajo."""
+    await interaction.response.defer(ephemeral=True)
+
+    # Validate job selection
+    if trabajo not in JOB_ROLES:
+        await interaction.followup.send(embed=create_embed(
+            title="❌ Trabajo Inválido",
+            description="Por favor, selecciona un trabajo válido de la lista.",
+            color=Colors.DANGER
+        ), ephemeral=True)
+        return
+
+    # Validate reason length
+    reason_words = razon.split()
+    if len(reason_words) < 10:
+        await interaction.followup.send(embed=create_embed(
+            title="❌ Razón Inválida",
+            description="La razón debe tener al menos 10 palabras. Por favor, proporciona más detalles.",
+            color=Colors.DANGER
+        ), ephemeral=True)
+        return
+
+    # Send ephemeral confirmation to user
+    confirmation_embed = create_embed(
+        title="✅ Postulación Enviada",
+        description=(
+            f"Tu postulación al trabajo **{JOB_ROLES[trabajo]['name']}** ha sido enviada con éxito.\n\n"
+            "Por favor, espera la revisión del staff. Recibirás una respuesta en un plazo mínimo de **24 horas**.\n"
+            "**Nota:** Asegúrate de tener los DMs abiertos para recibir la notificación."
+        ),
+        color=Colors.SUCCESS,
+        user=interaction.user
+    )
+    confirmation_embed.set_thumbnail(url=interaction.guild.icon.url if interaction.guild.icon else "")
+    await interaction.followup.send(embed=confirmation_embed, ephemeral=True)
+
+    # Send application to staff review channel
+    review_channel = bot.get_channel(Channels.JOB_REVIEW)
+    if not review_channel:
+        print(f"❌ Error: No se encontró el canal con ID {Channels.JOB_REVIEW}")
+        await interaction.followup.send(embed=create_embed(
+            title="❌ Error",
+            description="No se pudo enviar la postulación. Contacta a un administrador.",
+            color=Colors.DANGER
+        ), ephemeral=True)
+        return
+
+    application_embed = create_embed(
+        title="💼 Nueva Postulación a Trabajo",
+        description=f"Se ha recibido una nueva postulación para el trabajo **{JOB_ROLES[trabajo]['name']}**.",
+        color=Colors.WARNING,
+        user=interaction.user
+    )
+    application_embed.add_field(name="👤 Postulante", value=interaction.user.mention, inline=True)
+    application_embed.add_field(name="💼 Trabajo", value=JOB_ROLES[trabajo]['name'], inline=True)
+    application_embed.add_field(name="📝 Razón", value=razon, inline=False)
+    application_embed.add_field(name="🕒 Fecha", value=datetime.now().strftime('%d/%m/%Y %H:%M'), inline=True)
+    application_embed.add_field(name="📋 Estado", value="**Pendiente**", inline=False)
+    application_embed.set_thumbnail(url=interaction.user.display_avatar.url)
+
+    view = JobApplicationView(applicant=interaction.user, job_key=trabajo, reason=razon)
+    try:
+        await review_channel.send(embed=application_embed, view=view)
+    except discord.errors.Forbidden:
+        print(f"❌ Error: El bot no tiene permisos para enviar mensajes en {Channels.JOB_REVIEW}")
+        await interaction.followup.send(embed=create_embed(
+            title="❌ Error",
+            description="No se pudo enviar la postulación. Verifica los permisos del bot.",
+            color=Colors.DANGER
+        ), ephemeral=True)
+        return
+
+    # Log to job logs channel (changed from SANCTION_LOGS to JOB_LOGS)
+    log_channel = bot.get_channel(Channels.JOB_LOGS)
+    if log_channel:
+        log_embed = create_embed(
+            title="📜 Nueva Postulación Registrada",
+            description=f"Se ha registrado una nueva postulación al trabajo {JOB_ROLES[trabajo]['name']}.",
+            color=Colors.WARNING,
+            user=interaction.user
+        )
+        log_embed.add_field(name="👤 Postulante", value=interaction.user.mention, inline=True)
+        log_embed.add_field(name="💼 Trabajo", value=JOB_ROLES[trabajo]['name'], inline=True)
+        log_embed.add_field(name="📝 Razón", value=razon, inline=False)
+        await log_channel.send(embed=log_embed)
+
+# =============================================
+# ACTUALIZAR CANAL DE CONTEO DE USUARIOS
+# =============================================
+@bot.event
+async def on_member_join(member):
+    if member.bot:
+        return
+    await actualizar_canal_conteo_miembros(member.guild)
+
+@bot.event
+async def on_member_remove(member):
+    if member.bot:
+        return
+    await actualizar_canal_conteo_miembros(member.guild)
+
+async def actualizar_canal_conteo_miembros(guild):
+    canal_id = 1367394876479766580  # ID del canal a actualizar
+    canal = guild.get_channel(canal_id)
+    if canal:
+        conteo = sum(1 for m in guild.members if not m.bot)
+        nuevo_nombre = f"👥 Usuarios: {conteo}"
+        try:
+            await canal.edit(name=nuevo_nombre)
+        except Exception as e:
+            print(f"Error al actualizar el nombre del canal: {e}")
+
+# =============================================
+# INICIAR BOT
+# =============================================
 if __name__ == "__main__":
     bot.run(TOKEN)
